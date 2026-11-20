@@ -86,6 +86,8 @@ Manually review 10 to 20 percent of Tier S before outreach: open the website, sk
 - Choose the letter language by market convention: use the local business language where your sector expects it and you can write it correctly; use English where import trade in that market normally runs in English. Keep the same structure and hard rules in every language.
 - Sending: highest-ranked uncontacted companies first, within the daily cap in config, spread across recipient-local business hours, with the bounce circuit breaker armed (see `docs/06-exclusions-and-failsafes.md`).
 
+**Two fields, two audiences.** Every lead row carries two different company descriptions, and they must never be mixed. `profile` is the internal research note (buyer type, location, import evidence, fit judgement): it informs scoring and selection, and it is never shown to a recipient. `observation` is the letter-ready clause, written once at enrichment time in the market's letter language, using only what the company itself has published. The letter builder reads `observation` only, so trade data and internal judgements cannot leak into a letter by accident.
+
 ## Step 10 — Feed the results back
 
 Record the outcome of every send: delivered, opened (if known), replied, unsubscribed, hard-bounced. Then:

@@ -36,6 +36,7 @@ def load(path):
         row.setdefault("emails", [])
         row.setdefault("contact", "")
         row.setdefault("profile", "")
+        row.setdefault("observation", "")
         row.setdefault("country", "")
         row.setdefault("email_status", "")
         row.setdefault("email_status_raw", "")
@@ -53,8 +54,9 @@ def md_row(row, star=False):
     emails = "; ".join(row["emails"]) if row["emails"] else "-"
     mark = "Top: " if star else ""
     contact = row["contact"] or "-"
+    obs = (row.get("observation") or "-").replace("|", "/")
     return (f"| {mark}{row['company']} | {row['country']} | {row['profile']} | "
-            f"{contact} | {emails} | {row['email_status']} |")
+            f"{contact} | {emails} | {row['email_status']} | {obs} |")
 
 
 def render(leads):
@@ -72,8 +74,8 @@ def render(leads):
         if not items:
             continue
         parts.append(f"## {TIER_TITLE[tier]} ({len(items)})\n")
-        parts.append("| Company | Country | Profile | Contact | Emails | Email status |")
-        parts.append("|---|---|---|---|---|---|")
+        parts.append("| Company | Country | Profile | Contact | Emails | Email status | Observation |")
+        parts.append("|---|---|---|---|---|---|---|")
         parts += [md_row(r, star=id(r) in top_ids) for r in items]
         parts.append("")
 
@@ -99,6 +101,7 @@ def render(leads):
     parts.append(f"| Held in appendix | {len(rest)} |")
     parts.append(f"| With import signal | {sum(1 for r in leads if r.get('import_signal'))} |")
     parts.append(f"| With named contact | {sum(1 for r in leads if r.get('has_contact'))} |")
+    parts.append(f"| With observation | {sum(1 for r in leads if r.get('observation'))} |")
     return "\n".join(parts) + "\n"
 
 
