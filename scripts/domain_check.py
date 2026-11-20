@@ -7,7 +7,12 @@ domain:
 (a) MX lookup. A minimal DNS query for MX records, hand-built over UDP
     using only the standard library. If the UDP query fails (no resolver
     reachable, truncated answer, parse error), the system `nslookup`
-    subprocess is tried as a fallback.
+    subprocess is tried as a fallback. Resolver discovery is
+    cross-platform: /etc/resolv.conf on POSIX, `ipconfig /all` output on
+    Windows (English "DNS Servers" and Chinese "DNS 服务器" labels are
+    both recognised), then public fallbacks. The nslookup parser likewise
+    accepts both the English "mail exchanger" and the Chinese "邮件交换器"
+    wording.
 (b) Accept-all probe. Opens an SMTP conversation with the first MX host
     on port 25 (EHLO, MAIL FROM, RCPT TO a random non-existent local
     part). Reply 250 means the domain accepts any address
@@ -29,7 +34,9 @@ CLI:
 """
 import argparse
 import json
+import platform
 import random
+import re
 import socket
 import struct
 import subprocess
@@ -39,20 +46,67 @@ DNS_PORT = 53
 SMTP_PORT = 25
 TIMEOUT = 8
 
+# Public resolvers tried when no system resolver can be discovered.
+# 223.5.5.5 (AliDNS) comes first because it stays reachable from networks
+# where the international resolvers are filtered.
+FALLBACK_DNS = ("223.5.5.5", "8.8.8.8", "1.1.1.1")
+
+_IPV4 = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+
 
 # ---------------------------------------------------------------- MX lookup
 
+def parse_resolv_conf(text):
+    """Nameserver addresses from /etc/resolv.conf content (POSIX)."""
+    servers = []
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[0] == "nameserver":
+            servers.append(parts[1])
+    return servers
+
+
+def parse_ipconfig(text):
+    """DNS server addresses from Windows `ipconfig /all` output.
+
+    Recognises both the English "DNS Servers" label and the Chinese
+    "DNS 服务器" label, plus the indented continuation lines Windows
+    prints for additional servers.
+    """
+    servers = []
+    in_dns_block = False
+    for line in text.splitlines():
+        if "DNS Servers" in line or "DNS 服务器" in line:
+            in_dns_block = True
+            value = line.replace("：", ":").split(":", 1)
+            if len(value) == 2:
+                servers.extend(_IPV4.findall(value[1]))
+            continue
+        if in_dns_block:
+            stripped = line.strip()
+            if _IPV4.fullmatch(stripped):
+                servers.append(stripped)
+                continue
+            in_dns_block = False
+    return servers
+
+
 def _dns_servers():
     servers = []
-    try:
-        with open("/etc/resolv.conf", encoding="utf-8") as fh:
-            for line in fh:
-                parts = line.split()
-                if len(parts) == 2 and parts[0] == "nameserver":
-                    servers.append(parts[1])
-    except OSError:
-        pass
-    for fallback in ("8.8.8.8", "1.1.1.1"):
+    if platform.system() == "Windows":
+        try:
+            out = subprocess.run(["ipconfig", "/all"], capture_output=True,
+                                 text=True, timeout=15)
+            servers = parse_ipconfig(out.stdout or "")
+        except (OSError, subprocess.SubprocessError):
+            servers = []
+    else:
+        try:
+            with open("/etc/resolv.conf", encoding="utf-8") as fh:
+                servers = parse_resolv_conf(fh.read())
+        except OSError:
+            servers = []
+    for fallback in FALLBACK_DNS:
         if fallback not in servers:
             servers.append(fallback)
     return servers
@@ -138,19 +192,29 @@ def mx_via_udp(domain):
     return []
 
 
+def parse_nslookup_mx(text):
+    """MX hostnames from `nslookup -type=mx` output.
+
+    Accepts both the English "mail exchanger" wording and the Chinese
+    "邮件交换器" wording used by localised Windows builds.
+    """
+    records = []
+    for line in text.splitlines():
+        if ("mail exchanger" in line.lower() or "邮件交换器" in line) \
+                and "=" in line:
+            host = line.rsplit("=", 1)[1].strip().strip('"').rstrip(".")
+            if host:
+                records.append(host)
+    return records
+
+
 def mx_via_nslookup(domain):
     try:
         out = subprocess.run(["nslookup", "-type=mx", domain],
                              capture_output=True, text=True, timeout=15)
     except (OSError, subprocess.SubprocessError):
         return []
-    records = []
-    for line in out.stdout.splitlines():
-        if "mail exchanger" in line and "=" in line:
-            host = line.rsplit("=", 1)[1].strip().rstrip(".")
-            if host:
-                records.append(host)
-    return records
+    return parse_nslookup_mx(out.stdout or "")
 
 
 def mx_via_dig(domain):

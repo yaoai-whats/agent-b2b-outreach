@@ -5,8 +5,13 @@
 config/config.json
 config/blocklist.json
 
-# Runtime state and generated output
-data/leads.jsonl
+# Runtime state and generated output. Everything under data/ is local
+# working data (real lead rows, send state, feedback, logs) and must
+# never be committed; only the shipped documentation and example file
+# are whitelisted back in.
+data/*
+!data/README.md
+!data/leads.example.jsonl
 out/
 *.log
 

@@ -127,6 +127,12 @@ def build_email(lead, sender_name, sender_company, product, value_point,
             "company's public information first and store one factual "
             "clause on the row; this script does not generate filler "
             "observations")
+    # The value point sits mid-paragraph as a sentence of its own; make
+    # sure it actually ends like one even when the config value was
+    # written without a final period.
+    benefit = (value_point or "").strip()
+    if benefit and benefit[-1] not in ".!?":
+        benefit += "."
     intro = INTROS[_variant_idx(lead, 2) % len(INTROS)].format(product=product)
     closing = CLOSINGS[_variant_idx(lead, 4) % len(CLOSINGS)]
     emails = lead.get("emails") or []
@@ -135,14 +141,14 @@ def build_email(lead, sender_name, sender_company, product, value_point,
         subject = PARTNER_SUBJECT.format(product=product)
         body = PARTNER_BODY.format(
             name=name, company=company, observation=obs, intro=intro,
-            benefit=value_point, closing=closing,
+            benefit=benefit, closing=closing,
             sender_name=sender_name, sender_company=sender_company)
     else:
         subject = SUBJECTS[_variant_idx(lead, 1) % len(SUBJECTS)].format(
             product=product)
         body = BODY.format(
             name=name, company=company, observation=obs, intro=intro,
-            benefit=value_point, closing=closing,
+            benefit=benefit, closing=closing,
             sender_name=sender_name, sender_company=sender_company)
     return to, subject, body
 

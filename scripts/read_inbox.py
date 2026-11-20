@@ -8,9 +8,18 @@ The mailbox is opened READ-ONLY (no message is deleted, moved, or
 flagged) and the most recent N messages are fetched (--limit, default
 50). Each message is classified:
 
-- bounce:      the sender is a mailer-daemon / postmaster address, or
-               the subject mentions delivery, failure, or an
-               undeliverable message.
+- bounce:      a real delivery failure, judged conservatively because a
+               false bounce feeds the sending circuit breaker. A message
+               counts as a bounce only when the sender is a
+               mailer-daemon / postmaster address, OR the message is a
+               standard delivery status notification (multipart/report
+               with report-type=delivery-status, or a
+               message/delivery-status part), OR the subject carries a
+               strong bounce phrase (undeliverable, delivery has failed,
+               returned mail, ...). Ordinary business subjects that merely
+               contain the words "delivery" or "failure" (a delivery
+               schedule, a failure-rate question) are replies, not
+               bounces.
 - unsubscribe: the body asks to unsubscribe or stop contact
                (unsubscribe / stop / remove me / do not contact /
                opt out).
@@ -37,8 +46,13 @@ from datetime import datetime
 import _config
 
 BOUNCE_SENDERS = ("mailer-daemon", "postmaster", "mail-daemon")
-BOUNCE_SUBJECTS = ("delivery", "failure", "undeliverable", "returned mail",
-                   "not delivered", "delivery status")
+# Strong bounce phrases only. Bare words like "delivery" or "failure" must
+# never appear here: real buyers write subjects such as "Re: delivery
+# schedule for 500 sets" or "Re: LED tube failure rate", and a false bounce
+# both loses the buyer and feeds the sending circuit breaker.
+BOUNCE_SUBJECTS = ("undeliverable", "delivery has failed",
+                   "mail delivery failed", "returned mail",
+                   "undelivered mail", "delivery status notification")
 UNSUB_WORDS = ("unsubscribe", "remove me", "do not contact",
                "don't contact", "stop emailing", "opt out", "opt-out")
 
@@ -71,11 +85,41 @@ def _body_text(msg):
         return ""
 
 
-def classify(from_addr, subject, body):
+def _is_dsn(msg):
+    """True when the message is a standard delivery status notification.
+
+    Either the top-level content type is multipart/report with
+    report-type=delivery-status, or some part is message/delivery-status.
+    """
+    try:
+        if msg.get_content_type() == "multipart/report" and \
+                (msg.get_param("report-type") or "").lower() == \
+                "delivery-status":
+            return True
+        if msg.is_multipart():
+            for part in msg.walk():
+                if part.get_content_type() == "message/delivery-status":
+                    return True
+    except Exception:  # noqa: BLE001 - a malformed message is not a DSN
+        return False
+    return False
+
+
+def classify(from_addr, subject, body, is_dsn=False):
+    """Classify one message as "bounce", "unsubscribe", or "reply".
+
+    A bounce is declared only on strong evidence: a daemon sender, a
+    standard DSN structure (is_dsn), or a strong bounce phrase in the
+    subject. Everything else falls through to the unsubscribe check and
+    then to "reply".
+    """
     low_from = from_addr.lower()
+    if any(hint in low_from for hint in BOUNCE_SENDERS):
+        return "bounce"
+    if is_dsn:
+        return "bounce"
     low_subject = subject.lower()
-    if any(hint in low_from for hint in BOUNCE_SENDERS) or \
-            any(hint in low_subject for hint in BOUNCE_SUBJECTS):
+    if any(phrase in low_subject for phrase in BOUNCE_SUBJECTS):
         return "bounce"
     low_body = body.lower()
     if any(word in low_body for word in UNSUB_WORDS):
@@ -145,7 +189,7 @@ def main():
                 _decode(msg.get("From", "")))[1].lower()
             subject = _decode(msg.get("Subject", ""))
             body = _body_text(msg)
-            kind = classify(from_addr, subject, body)
+            kind = classify(from_addr, subject, body, is_dsn=_is_dsn(msg))
             date_str = ""
             if msg.get("Date"):
                 try:

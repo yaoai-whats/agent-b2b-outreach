@@ -48,19 +48,27 @@ cp config/blocklist.example.json config/blocklist.json
 # 3. Put API keys in the environment only (never in files)
 export HUNTER_API_KEYS="key-one,key-two"
 
-# 4. Check a Hunter account balance through the rotation pool
+# 4. Run the self-check: Python version, config still on example values,
+#    missing environment variables, DNS/MX reachability, SMTP
+#    connectivity, and sender-address conflicts, reported as
+#    PASS / WARN / FAIL lines (fix every FAIL before continuing)
+python3 scripts/doctor.py
+
+# 5. Check a Hunter account balance through the rotation pool
 python3 scripts/hunter_pool.py account
 
-# 5. Add leads (manually or via the scan prompt), then render the ranked table
+# 6. Add leads (manually or via the scan prompt), then render the ranked table
 python3 scripts/render.py --input data/leads.example.jsonl --output /tmp/ranked.md
 
-# 6. Build a letter for one lead and run the quality gate
+# 7. Build a letter for one lead and run the quality gate
 python3 scripts/letter_builder.py --lead data/leads.example.jsonl --line 1
 python3 scripts/quality_gate.py --help
 
-# 7. Build the follow-up tracker
+# 8. Build the follow-up tracker
 python3 scripts/build_tracker.py --help
 ```
+
+> **Windows note:** read `python3` above as `python` (or `py -3`) on Windows; every other argument is identical. The scripts use only the Python standard library and run on Windows as-is; `scripts/domain_check.py` discovers DNS servers from `ipconfig /all` output on Windows and parses both English and Chinese system output.
 
 To run the pipeline with an AI agent, give the agent `AGENTS.md` first, then hand it one stage prompt at a time from `prompts/`.
 
@@ -70,13 +78,15 @@ Business-specific values are centralised in one file: `config/config.json` (star
 
 Domain-level checks (MX lookup and the accept-all probe) are implemented in `scripts/domain_check.py` with the standard library only. Sending and inbox processing are in-repo too: `scripts/send_mail.py` (SMTP, credentials from environment variables only, dry-run by default, with recipient-status, daily-cap, and bounce-breaker checks built in) and `scripts/read_inbox.py` (read-only IMAP fetch that classifies replies, bounces, and unsubscribes).
 
+Sending has two modes: single (`--lead ... --line N`) and batch (`--batch --lead data/leads.jsonl`). Batch mode processes every sendable row in order — letter built, quality gate, the same four checks per letter — spaced by 60 seconds plus a random 0–30 second jitter by default; it stops when the daily cap (`daily_send_cap` minus today's recorded sends) is reached or when the bounce circuit breaker trips, and prints the stop reason. Both modes are dry runs unless `--send` is given. The SMTP connection mode follows the port: 465 (or `SMTP_USE_SSL=1`) uses implicit TLS, the default mode of QQ Mail, 163 Mail, and Aliyun Mail; other ports use STARTTLS, and error messages name the mode in use.
+
 Key groups:
 
 - **Offer:** `product`, `product_keywords`, `hs_codes`, `value_points`
 - **Markets:** `target_markets`, `excluded_markets` (markets you choose not to serve, with your own reasons)
 - **Buyers:** `buyer_categories`, `decision_maker_titles`, `fit_signals`, `scoring_weights`
 - **Exclusions:** `exclusion_rules` (your own rules, for example suspected competitors or existing customers), plus `config/blocklist.json`
-- **Sender:** `sender_name`, `sender_company`, `sender_email`, `notification_email`
+- **Sender:** `sender_name`, `sender_company`, `sender_email`, `notification_email`. The actual From address follows a fixed priority: the `SMTP_FROM` environment variable > `sender_email` in config > `SMTP_USER`; when the first two are both set and differ, `SMTP_FROM` wins and `scripts/doctor.py` warns about it
 - **Sending safety:** `daily_send_cap`, `followup_interval_days`, `followup_max`, bounce circuit-breaker thresholds
 - **Keys:** `hunter_api_keys_env` names the environment variable that holds your keys (`HUNTER_API_KEYS` by default)
 
@@ -96,7 +106,8 @@ Key groups:
 │   └── leads.example.jsonl    Exactly 3 fictional sample companies
 ├── docs/                      Method, scoring, verification, letter, follow-up, failsafe guides
 ├── prompts/                   Step 0 onboarding plus one platform-agnostic prompt per pipeline stage
-├── scripts/                   Config loader, search layer, domain check, Hunter pool, quality gate, letter builder, sender, inbox reader, dedupe, renderer, tracker
+├── scripts/                   Config loader, self-check, search layer, domain check, Hunter pool, quality gate, letter builder, sender, inbox reader, dedupe, renderer, tracker
+├── tests/                     Standard-library unittest regression tests (python3 -m unittest discover -s tests)
 └── templates/
     └── letter-templates.md    Fill-in letter templates (standard + channel partner)
 ```

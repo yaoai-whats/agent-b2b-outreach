@@ -47,19 +47,26 @@ cp config/blocklist.example.json config/blocklist.json
 export HUNTER_API_KEYS="key-one,key-two"     # Hunter 邮箱查找/验证（可选，三方轮换）
 export SERPER_API_KEY="your-key"             # 搜索层，三选一即可（Serper 优先）
 
-# 4. 查 Hunter 轮换池余额
+# 4. 跑一遍自检：Python 版本、配置是否还是示例值、环境变量齐不齐、
+#    DNS 能不能查 MX、SMTP 服务器通不通、发件人地址有没有冲突，
+#    一次列清 PASS / WARN / FAIL（有 FAIL 先修再往下走）
+python3 scripts/doctor.py
+
+# 5. 查 Hunter 轮换池余额
 python3 scripts/hunter_pool.py account
 
-# 5. 加入客户（手动或用扫客提示词），生成排序总表
+# 6. 加入客户（手动或用扫客提示词），生成排序总表
 python3 scripts/render.py --input data/leads.example.jsonl --output /tmp/ranked.md
 
-# 6. 给一家客户生成开发信并过质检门
+# 7. 给一家客户生成开发信并过质检门
 python3 scripts/letter_builder.py --lead data/leads.example.jsonl --line 1
 python3 scripts/quality_gate.py --help
 
-# 7. 生成跟进表
+# 8. 生成跟进表
 python3 scripts/build_tracker.py --help
 ```
+
+> **Windows 用户注意**：上面命令里的 `python3` 在 Windows 上通常写作 `python`（或 `py -3`），其余参数完全相同。本仓库的脚本只用 Python 标准库，Windows 可直接跑；`scripts/domain_check.py` 的 DNS 解析在 Windows 上会自动读取 `ipconfig /all` 的 DNS 服务器配置，中英文系统输出都能解析。
 
 用 AI 智能体（Codex、WorkBuddy、Claude 等）跑这条流水线时：先让它读 `AGENTS.md`，再从 `prompts/` 里按阶段逐个把提示词交给它执行。
 
@@ -75,6 +82,8 @@ python3 scripts/build_tracker.py --help
 
 域名层面的两项检查（MX 查询、accept-all 探测）由 `scripts/domain_check.py` 用纯标准库实现，是生成候选邮箱之前必跑的步骤，见 `docs/03-email-verification.md`。发送与收件也都有仓库内脚本：`scripts/send_mail.py`（SMTP 发送，凭据只走环境变量，默认 dry-run，自带收件人状态校验、每日上限与退信熔断）和 `scripts/read_inbox.py`（IMAP 只读拉取并分类回复、退信、退订）。
 
+发送有两种模式：单封（`--lead ... --line N`）与批量（`--batch --lead data/leads.jsonl`）。批量模式会把客户库里状态合格的行逐封处理：自动组信、过质检、四道校验照旧，封与封之间默认间隔 60 秒加 0–30 秒随机抖动；当日封顶按 `daily_send_cap` 减去今日已发数计算，达顶即停，退信熔断触发同样立即停并说明原因。两种模式默认都是 dry-run，加 `--send` 才真发。SMTP 连接模式按端口自动选：465 端口（或环境变量 `SMTP_USE_SSL=1`）走 SSL 直连（QQ 邮箱、163、阿里云邮箱的默认模式），其余端口走 STARTTLS，报错信息会注明当前模式方便排障。
+
 脚本按顺序用第一个配置好的搜索 API：`SERPER_API_KEY`（Serper，Google 索引，验邮箱精确匹配最稳）→ `TAVILY_API_KEY` → `BRAVE_API_KEY`，三家都有免费额度，配任意一个即可。一个都没配时脚本会退出并给出 FALLBACK 提示，此时才许用 Agent 自带搜索顶上，但要在运行日志注明“搜索层降级”，验真结果降一档处理。
 
 执行 Agent 的最低能力四样：网页搜索、打开读网页、运行 Python、读写文件。缺任何一样，都要在运行日志里明说哪一步降级了。
@@ -87,7 +96,7 @@ python3 scripts/build_tracker.py --help
 - **市场**：`target_markets`、`excluded_markets`（你自己选择不做的市场，逐个写明原因）
 - **买家**：`buyer_categories`、`decision_maker_titles`、`fit_signals`、`scoring_weights`
 - **排除规则**：`exclusion_rules`（你自己的规则，例如疑似同行、已有客户），另加 `config/blocklist.json`
-- **发件人**：`sender_name`、`sender_company`、`sender_email`、`notification_email`
+- **发件人**：`sender_name`、`sender_company`、`sender_email`、`notification_email`。实际发件地址的优先级是写死的：环境变量 `SMTP_FROM` > config 的 `sender_email` > `SMTP_USER`；前两者都设了且不一致时以 `SMTP_FROM` 为准，`scripts/doctor.py` 会给出警告
 - **发送安全**：`daily_send_cap`（每日上限）、`followup_interval_days`、`followup_max`、退信熔断阈值
 - **密钥**：`hunter_api_keys_env` 指向存放密钥的环境变量名（默认 `HUNTER_API_KEYS`），密钥本身永不进文件
 
@@ -108,7 +117,8 @@ python3 scripts/build_tracker.py --help
 │   └── leads.example.jsonl    3 家虚构示例公司
 ├── docs/                      方法、评分、验证、信件、跟进、防线六篇
 ├── prompts/                   第 0 步问询 + 五个阶段各一份平台无关的提示词
-├── scripts/                   配置加载、搜索层、域名检查、Hunter 轮换、质检门、信件生成、发送、收件箱、去重、总表、跟进表
+├── scripts/                   配置加载、自检、搜索层、域名检查、Hunter 轮换、质检门、信件生成、发送、收件箱、去重、总表、跟进表
+├── tests/                     标准库 unittest 回归测试（python3 -m unittest discover -s tests）
 └── templates/
     └── letter-templates.md    开发信填空模板（标准版 + 渠道伙伴版）
 ```

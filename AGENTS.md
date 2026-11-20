@@ -34,16 +34,18 @@ No stage runs before Step 0 is complete. Business parameters are asked, not assu
 Shared scripts:
 
 - `scripts/_config.py` — the one config loader every other script uses. It reads `config/config.json` (falling back to `config/config.example.json`); command-line arguments override config values.
+- `scripts/doctor.py` — one-shot self-check for a new machine or a "stopped working" report: Python version, config completeness (example placeholders are FAILs), environment variables present or absent (values never printed), DNS/MX reachability, SMTP connectivity (greeting only unless `--smtp-login`), and sender-address conflicts. Run it before the first batch on any machine.
 - `scripts/web_search.py` — unified search layer (see “Capability requirements” below). All discovery and exact-match verification should go through it.
 - `scripts/domain_check.py` — MX lookup and accept-all probe for a domain (the two checks `docs/03-email-verification.md` requires before candidate work), pure standard library.
 - `scripts/hunter_pool.py` — Hunter API calls with key rotation. Keys come from the environment variable named in config (`hunter_api_keys_env`). Never print a key.
 - `scripts/quality_gate.py` — deterministic letter checks. A letter that fails the gate does not ship.
 - `scripts/letter_builder.py` — builds a letter from the templates with per-company variant rotation. The observation sentence comes from the lead row's researched `observation` field; the script never invents one.
-- `scripts/send_mail.py` — sends one gate-passed letter over SMTP. Credentials come from environment variables only (`SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`/`SMTP_FROM`); it refuses unverified recipients, enforces the daily cap and the bounce circuit breaker, and is a dry run unless `--send` is given.
+- `scripts/send_mail.py` — sends gate-passed letters over SMTP, one at a time or as a spaced batch (`--batch`). Credentials come from environment variables only (`SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`/`SMTP_FROM`); it refuses unverified recipients, enforces the daily cap and the bounce circuit breaker, and is a dry run unless `--send` is given. The From address resolves as SMTP_FROM > config `sender_email` > SMTP_USER; port 465 (or `SMTP_USE_SSL=1`) uses implicit TLS, other ports STARTTLS.
 - `scripts/read_inbox.py` — reads the sending mailbox over IMAP (`IMAP_HOST`/`IMAP_USER`/`IMAP_PASS`), read-only, and classifies replies, bounces, and unsubscribes into the feedback log.
 - `scripts/dedupe.py` — merges duplicate lead rows on domain, merging emails and reporting conflicts; writes back only with `--write`.
 - `scripts/render.py` — renders `leads.jsonl` into a ranked Markdown table.
 - `scripts/build_tracker.py` — builds the follow-up tracker CSV from lead, send, and feedback state.
+- `tests/` — standard-library unittest regression tests for the inbox classifier, the quality gate, and the domain-check output parsers. Run `python3 -m unittest discover -s tests` after changing any script; all tests must pass before the change is used.
 
 ## Capability requirements & the search layer (important)
 
