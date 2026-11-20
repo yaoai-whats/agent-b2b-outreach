@@ -80,9 +80,9 @@ python3 scripts/build_tracker.py --help
 - `maps` 子命令：地图渠道找本地买家（有 Serper Key 时走地图端点，其他搜索商回退普通搜索并在输出里标明）；
 - `trade` 子命令：查贸易数据站的公开页面（这类站点没有公开 API，只能拿到搜索引擎可见的页面，须打开核实，不能当已验证的贸易记录）。
 
-域名层面的两项检查（MX 查询、accept-all 探测）由 `scripts/domain_check.py` 用纯标准库实现，是生成候选邮箱之前必跑的步骤，见 `docs/03-email-verification.md`。发送与收件也都有仓库内脚本：`scripts/send_mail.py`（SMTP 发送，凭据只走环境变量，默认 dry-run，自带收件人状态校验、每日上限与退信熔断）和 `scripts/read_inbox.py`（IMAP 只读拉取并分类回复、退信、退订）。
+域名层面的两项检查（MX 查询、accept-all 探测）由 `scripts/domain_check.py` 用纯标准库实现，是生成候选邮箱之前必跑的步骤，见 `docs/03-email-verification.md`。发送与收件也都有仓库内脚本：`scripts/send_mail.py`（SMTP 发送，凭据只走环境变量，默认 dry-run，自带收件人状态校验、排除检查、每日上限与退信熔断）和 `scripts/read_inbox.py`（IMAP 只读拉取并分类回复、退信、退订；退订者会自动追加进 `config/blocklist.json`，之后的发送会被排除检查拦下，退订闭环不需要人工搬运）。
 
-发送有两种模式：单封（`--lead ... --line N`）与批量（`--batch --lead data/leads.jsonl`）。批量模式会把客户库里状态合格的行逐封处理：自动组信、过质检、四道校验照旧，封与封之间默认间隔 60 秒加 0–30 秒随机抖动；当日封顶按 `daily_send_cap` 减去今日已发数计算，达顶即停，退信熔断触发同样立即停并说明原因。两种模式默认都是 dry-run，加 `--send` 才真发。SMTP 连接模式按端口自动选：465 端口（或环境变量 `SMTP_USE_SSL=1`）走 SSL 直连（QQ 邮箱、163、阿里云邮箱的默认模式），其余端口走 STARTTLS，报错信息会注明当前模式方便排障。
+发送有两种模式：单封（`--lead ... --line N`）与批量（`--batch --lead data/leads.jsonl`）。批量模式会把客户库里状态合格的行逐封处理：自动组信、过质检、五道校验照旧（收件人状态、排除检查、质检门、每日上限、退信熔断），封与封之间默认间隔 60 秒加 0–30 秒随机抖动；当日封顶按 `daily_send_cap` 减去今日已发数计算，达顶即停，退信熔断触发同样立即停并说明原因。其中排除检查会先在批量开始前预筛：命中黑名单（`config/blocklist.json`，按邮箱或域名）、已经发过冷邮件的地址或公司、在反馈记录里退订过或退信过的地址，都会逐行打印原因并计入汇总的 excluded 计数，绝不重复发送。两种模式默认都是 dry-run，加 `--send` 才真发。SMTP 连接模式按端口自动选：465 端口（或环境变量 `SMTP_USE_SSL=1`）走 SSL 直连（QQ 邮箱、163、阿里云邮箱的默认模式），其余端口走 STARTTLS，报错信息会注明当前模式方便排障。
 
 脚本按顺序用第一个配置好的搜索 API：`SERPER_API_KEY`（Serper，Google 索引，验邮箱精确匹配最稳）→ `TAVILY_API_KEY` → `BRAVE_API_KEY`，三家都有免费额度，配任意一个即可。一个都没配时脚本会退出并给出 FALLBACK 提示，此时才许用 Agent 自带搜索顶上，但要在运行日志注明“搜索层降级”，验真结果降一档处理。
 

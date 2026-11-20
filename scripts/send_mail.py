@@ -33,21 +33,31 @@ Input:
 - Batch (--batch, with --lead): every row whose email_status is
   sendable (optionally narrowed to one label with --to-status) is
   processed in file order: letter built, quality gate, then the same
-  four checks per letter. Letters are spaced by --interval seconds
-  (default 60) plus a random 0-30 second jitter (in a dry run the wait
-  is reported, not slept). The run stops when the daily cap is reached
-  (cap minus today's recorded sends, counting this run's sends) or when
-  the bounce circuit breaker trips; the stop reason is printed.
+  five checks per letter. Rows the exclusion check (check 2) would
+  refuse are screened out before the loop, printed with their reason,
+  and counted as "excluded" in the closing summary. Letters are spaced
+  by --interval seconds (default 60) plus a random 0-30 second jitter
+  (in a dry run the wait is reported, not slept). The run stops when
+  the daily cap is reached (cap minus today's recorded sends, counting
+  this run's sends) or when the bounce circuit breaker trips; the stop
+  reason is printed.
 
 Mandatory checks before any send (a failed check refuses the send and
 says why; there is no override flag):
 1. Recipient status: the lead row's email_status must be hunter_valid
    or public_confirmed. accept_all_unconfirmed, unverified, and invalid
    addresses are refused.
-2. Quality gate: the letter must pass scripts/quality_gate.py.
-3. Daily cap: sends recorded in data/send-state.json for today (plus
+2. Exclusions: the recipient must not be excluded. Excluded means the
+   address or its domain appears in config/blocklist.json; a cold
+   email was already sent to this address or to this company (the
+   send-state sent/followups records — this script is the cold path,
+   follow-ups go through the tracker flow, never through here); or
+   the feedback log records an unsubscribe or a bounce for this
+   address.
+3. Quality gate: the letter must pass scripts/quality_gate.py.
+4. Daily cap: sends recorded in data/send-state.json for today (plus
    this run's sends) must be below daily_send_cap (see config).
-4. Bounce circuit breaker: when data/outreach-feedback.json exists,
+5. Bounce circuit breaker: when data/outreach-feedback.json exists,
    refuse when today's bounces reach bounce_breaker_daily, or when the
    bounce rate among the most recent bounce_breaker_window sends
    reaches bounce_breaker_rate (thresholds from config).
@@ -108,6 +118,31 @@ def parse_letter_file(path):
         elif line.strip() == "":
             in_body = True
     return to_addr, subject, "\n".join(body_lines).strip("\n")
+
+
+def default_blocklist_path():
+    """The operator's blocklist: config/blocklist.json in the repo."""
+    return os.path.join(_config.repo_root(), "config", "blocklist.json")
+
+
+def load_blocklist(path):
+    """Blocklist entries; a missing or malformed file means no entries."""
+    data = _load_json(path, {"entries": []})
+    if isinstance(data, dict):
+        entries = data.get("entries", [])
+        if isinstance(entries, list):
+            return entries
+    return []
+
+
+def recipient_of(lead):
+    """The address a letter to this lead row would go to.
+
+    Mirrors letter_builder.build_email: useful_email first, then the
+    first recorded email.
+    """
+    emails = lead.get("emails") or []
+    return (lead.get("useful_email") or (emails[0] if emails else "") or "")
 
 
 def check_breaker(feedback_path, state):
@@ -217,7 +252,7 @@ def _deliver(sender, to_addr, subject, body):
 
 
 class Sender:
-    """Runs the four mandatory checks and one send attempt per letter.
+    """Runs the five mandatory checks and one send attempt per letter.
 
     Shared by single-letter and batch modes so both enforce identical
     rules. `extra_today` counts letters already sent (or dry-run
@@ -225,13 +260,66 @@ class Sender:
     daily cap on state that only updates on disk between runs.
     """
 
-    def __init__(self, state, state_path, log_path, feedback_path, send):
+    def __init__(self, state, state_path, log_path, feedback_path, send,
+                 blocklist_path=None):
         self.state = state
         self.state_path = state_path
         self.log_path = log_path
         self.feedback_path = feedback_path
         self.send = send
         self.extra_today = 0
+        self.blocklist_path = blocklist_path or default_blocklist_path()
+        self.blocklist_entries = load_blocklist(self.blocklist_path)
+        feedback = _load_json(feedback_path, {"entries": []})
+        self.feedback_entries = (feedback.get("entries", [])
+                                 if isinstance(feedback, dict) else [])
+
+    def exclusion_reason(self, to_addr, company):
+        """Why this recipient is excluded, or None when they are clear.
+
+        The three sources, in order: config/blocklist.json (address or
+        domain), the send-state records (this cold path never re-sends
+        to an address or company it already contacted), and the
+        feedback log (unsubscribe or bounce for this address).
+        """
+        addr = (to_addr or "").strip().lower()
+        domain = addr.rsplit("@", 1)[-1] if "@" in addr else ""
+        for entry in self.blocklist_entries:
+            entry_email = (entry.get("email") or "").strip().lower()
+            entry_domain = (entry.get("domain") or "").strip().lower()
+            if addr and entry_email == addr:
+                return (f"blocklist: {addr} is listed in "
+                        f"config/blocklist.json (reason: "
+                        f"{entry.get('reason', 'unspecified')}, added "
+                        f"{entry.get('added_at', 'unknown date')})")
+            if domain and entry_domain == domain:
+                return (f"blocklist: domain {domain} is listed in "
+                        f"config/blocklist.json (reason: "
+                        f"{entry.get('reason', 'unspecified')}, added "
+                        f"{entry.get('added_at', 'unknown date')})")
+        records = (self.state.get("sent", [])
+                   + self.state.get("followups", []))
+        for record in records:
+            sent_to = (record.get("to") or "").strip().lower()
+            when = str(record.get("sent_at", ""))[:10] or "unknown date"
+            if addr and sent_to == addr:
+                return (f"already contacted: a cold email was already "
+                        f"sent to {addr} on {when}; follow-ups go "
+                        "through the tracker flow, not this script")
+            if company and record.get("company") == company:
+                return (f"already contacted: {company} already has a "
+                        f"send record on {when} (to {sent_to or '?'})")
+        for entry in self.feedback_entries:
+            if (entry.get("email") or "").strip().lower() != addr or not addr:
+                continue
+            if entry.get("type") == "unsubscribe":
+                return (f"unsubscribed: {addr} asked to unsubscribe on "
+                        f"{entry.get('date', 'unknown date')}; never "
+                        "contact this address again")
+            if entry.get("type") == "bounce":
+                return (f"previously bounced: mail to {addr} bounced "
+                        f"on {entry.get('date', 'unknown date')}")
+        return None
 
     def _log(self, company, to_addr, subject, outcome, reason=""):
         _append_jsonl(self.log_path, {
@@ -254,7 +342,14 @@ class Sender:
             self._log(company, to_addr, subject, "refused", reason)
             return "refused", reason, False
 
-        # Check 2: quality gate.
+        # Check 2: exclusions (blocklist, already contacted,
+        # unsubscribed, previously bounced).
+        excluded = self.exclusion_reason(to_addr, company)
+        if excluded:
+            self._log(company, to_addr, subject, "refused", excluded)
+            return "refused", excluded, False
+
+        # Check 3: quality gate.
         import quality_gate
         failures = quality_gate.check_email(gate_name, subject, body)
         if failures:
@@ -262,7 +357,7 @@ class Sender:
             self._log(company, to_addr, subject, "refused", reason)
             return "refused", reason, False
 
-        # Check 3: daily cap (recorded sends + this run's sends).
+        # Check 4: daily cap (recorded sends + this run's sends).
         cap = _config.get("daily_send_cap", 30)
         sent_today = sum(1 for e in self.state.get("sent", [])
                          if str(e.get("sent_at", "")).startswith(_today()))
@@ -272,7 +367,7 @@ class Sender:
             self._log(company, to_addr, subject, "refused", reason)
             return "refused", reason, True
 
-        # Check 4: bounce circuit breaker.
+        # Check 5: bounce circuit breaker.
         breaker = check_breaker(self.feedback_path, self.state)
         if breaker:
             self._log(company, to_addr, subject, "refused", breaker)
@@ -321,7 +416,8 @@ def _missing_creds_note():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Send letters with status, cap, and breaker checks.")
+        description="Send letters with status, exclusion, gate, cap, "
+                    "and breaker checks.")
     parser.add_argument("--lead", default=None, help="Path to a leads .jsonl file.")
     parser.add_argument("--line", type=int, default=1,
                         help="1-based lead row (single mode, with --lead).")
@@ -369,7 +465,21 @@ def main():
             print(f"From: {resolve_sender(os.environ.get('SMTP_USER', ''))}")
             _missing_creds_note()
         counts = {"sent": 0, "would_send": 0, "refused": 0, "error": 0,
-                  "skipped": 0}
+                  "skipped": 0, "excluded": 0}
+        # Exclusion prescreen (check 2): rows the exclusion check
+        # would refuse are named here with their reason and counted,
+        # instead of being refused silently inside the send loop.
+        # attempt() still re-checks every letter that does go through.
+        sendable = []
+        for row in eligible:
+            reason = sender.exclusion_reason(recipient_of(row),
+                                             row.get("company", ""))
+            if reason:
+                counts["excluded"] += 1
+                print(f"EXCLUDED {row.get('company', '')}: {reason}")
+            else:
+                sendable.append(row)
+        eligible = sendable
         stop_reason = ""
         for idx, lead in enumerate(eligible):
             company = lead.get("company", "")

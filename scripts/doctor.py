@@ -51,9 +51,12 @@ def _example_values():
     import json
     path = os.path.join(_config.repo_root(), "config",
                         "config.example.json")
-    if os.path.exists(path):
-        with open(path, encoding="utf-8") as fh:
-            return json.load(fh)
+    try:
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as fh:
+                return json.load(fh)
+    except (OSError, ValueError):
+        pass
     return {}
 
 
@@ -135,7 +138,13 @@ def check_smtp(login):
     if not host:
         report("WARN", "SMTP connectivity", "SMTP_HOST not set; skipped")
         return
-    port = int(os.environ.get("SMTP_PORT", "587"))
+    try:
+        port = int(os.environ.get("SMTP_PORT", "587"))
+    except ValueError:
+        report("FAIL", "SMTP connectivity",
+               f"SMTP_PORT is not a number: "
+               f"{os.environ.get('SMTP_PORT')!r}")
+        return
     import send_mail
     mode = send_mail.connection_mode(port)
     try:
@@ -193,6 +202,14 @@ def check_sender_conflict():
                    "sender_email, and SMTP_USER are all empty)")
 
 
+def _guarded(fn, *args):
+    """Run one check; a crashed check is a FAIL line, never a traceback."""
+    try:
+        fn(*args)
+    except Exception as exc:  # noqa: BLE001 - report, never crash
+        report("FAIL", fn.__name__, f"check raised an error: {exc}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Self-check the machine, config, and credentials.")
@@ -201,12 +218,12 @@ def main():
                              "and read the greeting only).")
     args = parser.parse_args()
 
-    check_python()
-    check_config()
-    check_env()
-    check_dns()
-    check_smtp(args.smtp_login)
-    check_sender_conflict()
+    _guarded(check_python)
+    _guarded(check_config)
+    _guarded(check_env)
+    _guarded(check_dns)
+    _guarded(check_smtp, args.smtp_login)
+    _guarded(check_sender_conflict)
 
     fails = _RESULTS.count("FAIL")
     warns = _RESULTS.count("WARN")

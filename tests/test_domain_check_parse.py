@@ -15,7 +15,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "scripts"))
 
-from domain_check import parse_ipconfig, parse_nslookup_mx, parse_resolv_conf  # noqa: E402
+from domain_check import decode_output, parse_ipconfig, parse_nslookup_mx, parse_resolv_conf  # noqa: E402
 
 
 NSLOOKUP_EN = """\
@@ -93,6 +93,32 @@ class TestIpconfigParse(unittest.TestCase):
 
     def test_no_dns_label(self):
         self.assertEqual(parse_ipconfig("Windows IP Configuration\n"), [])
+
+
+class TestDecodeOutput(unittest.TestCase):
+    def test_gbk_nslookup_output_decodes_and_parses(self):
+        # A Chinese Windows console emits GBK bytes. Decoding them as
+        # UTF-8 raised UnicodeDecodeError out of the subprocess helpers
+        # (and a traceback in doctor); decode_output must recover the
+        # text so the MX records survive.
+        raw = NSLOOKUP_ZH.encode("gbk")
+        self.assertEqual(
+            parse_nslookup_mx(decode_output(raw)),
+            ["gmail-smtp-in.l.google.com",
+             "alt1.gmail-smtp-in.l.google.com"])
+
+    def test_gbk_ipconfig_output_decodes_and_parses(self):
+        raw = IPCONFIG_ZH.encode("gbk")
+        self.assertEqual(parse_ipconfig(decode_output(raw)),
+                         ["223.5.5.5", "192.168.1.1"])
+
+    def test_invalid_bytes_never_raise(self):
+        text = decode_output(b"\xff\xfe\x00\x80abc\x81\x82\xff")
+        self.assertIsInstance(text, str)
+
+    def test_none_and_str_passthrough(self):
+        self.assertEqual(decode_output(None), "")
+        self.assertEqual(decode_output("already text"), "already text")
 
 
 class TestResolvConfParse(unittest.TestCase):

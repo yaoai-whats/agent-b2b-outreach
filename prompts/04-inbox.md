@@ -25,7 +25,7 @@ You are the executing agent running Stage 4 of the B2B Outreach System in this r
    - Out of office (note the return date and any named alternate contact)
 3. **Write back immediately:**
    - Hard bounce: label the address `invalid`, return the company to enrichment, note the pattern that produced the address as suspect.
-   - Unsubscribe: add the address and company to the blocklist source data for the operator, remove from all future batches and follow-ups.
+   - Unsubscribe: `scripts/read_inbox.py` has already appended the address and domain to `config/blocklist.json` automatically (reason `unsubscribe`); verify the entry is there, and remove the company from all future batches and follow-ups.
    - Any reply: remove the company from the automated follow-up pool and record the reply summary and date.
    - Out of office with an alternate contact: record the alternate as an unverified contact lead for Stage 2.
 4. **Run the circuit-breaker check** on the updated numbers: bounces today and bounces among the most recent 20 sends against the thresholds in config. If either threshold is met, set the breaker state in the feedback log, stop any pending sending, and notify the operator at the notification address in config.

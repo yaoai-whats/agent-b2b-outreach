@@ -12,7 +12,11 @@ domain:
     Windows (English "DNS Servers" and Chinese "DNS 服务器" labels are
     both recognised), then public fallbacks. The nslookup parser likewise
     accepts both the English "mail exchanger" and the Chinese "邮件交换器"
-    wording.
+    wording. Subprocess output is captured as bytes and decoded
+    defensively (locale encoding, then UTF-8, then GBK — a localised
+    Windows console emits GBK, and decoding it as UTF-8 used to raise
+    UnicodeDecodeError straight out of these helpers), so a console
+    encoding can never crash the check; any failure yields no records.
 (b) Accept-all probe. Opens an SMTP conversation with the first MX host
     on port 25 (EHLO, MAIL FROM, RCPT TO a random non-existent local
     part). Reply 250 means the domain accepts any address
@@ -34,6 +38,7 @@ CLI:
 """
 import argparse
 import json
+import locale
 import platform
 import random
 import re
@@ -52,6 +57,31 @@ TIMEOUT = 8
 FALLBACK_DNS = ("223.5.5.5", "8.8.8.8", "1.1.1.1")
 
 _IPV4 = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+
+
+def decode_output(raw):
+    """Decode subprocess output bytes to text; never raises.
+
+    Console tools on a localised Windows emit GBK while Python may
+    assume UTF-8 (notably with PYTHONUTF8=1), so callers capture bytes
+    and decode here: try the locale encoding, UTF-8, and GBK in order,
+    and fall back to replacement characters when none fits.
+    """
+    if raw is None:
+        return ""
+    if isinstance(raw, str):
+        return raw
+    candidates = []
+    for enc in (locale.getpreferredencoding(False), "utf-8", "gbk"):
+        if enc and enc.lower() not in [c.lower() for c in candidates]:
+            candidates.append(enc)
+    for enc in candidates:
+        try:
+            return raw.decode(enc)
+        except (UnicodeDecodeError, ValueError, LookupError):
+            continue
+    return raw.decode(candidates[0] if candidates else "utf-8",
+                      "replace")
 
 
 # ---------------------------------------------------------------- MX lookup
@@ -96,15 +126,15 @@ def _dns_servers():
     if platform.system() == "Windows":
         try:
             out = subprocess.run(["ipconfig", "/all"], capture_output=True,
-                                 text=True, timeout=15)
-            servers = parse_ipconfig(out.stdout or "")
-        except (OSError, subprocess.SubprocessError):
+                                 timeout=15)
+            servers = parse_ipconfig(decode_output(out.stdout))
+        except (OSError, subprocess.SubprocessError, ValueError):
             servers = []
     else:
         try:
             with open("/etc/resolv.conf", encoding="utf-8") as fh:
                 servers = parse_resolv_conf(fh.read())
-        except OSError:
+        except (OSError, ValueError):
             servers = []
     for fallback in FALLBACK_DNS:
         if fallback not in servers:
@@ -211,20 +241,20 @@ def parse_nslookup_mx(text):
 def mx_via_nslookup(domain):
     try:
         out = subprocess.run(["nslookup", "-type=mx", domain],
-                             capture_output=True, text=True, timeout=15)
-    except (OSError, subprocess.SubprocessError):
+                             capture_output=True, timeout=15)
+    except (OSError, subprocess.SubprocessError, ValueError):
         return []
-    return parse_nslookup_mx(out.stdout or "")
+    return parse_nslookup_mx(decode_output(out.stdout))
 
 
 def mx_via_dig(domain):
     try:
         out = subprocess.run(["dig", "+short", "MX", domain],
-                             capture_output=True, text=True, timeout=15)
-    except (OSError, subprocess.SubprocessError):
+                             capture_output=True, timeout=15)
+    except (OSError, subprocess.SubprocessError, ValueError):
         return []
     records = []
-    for line in out.stdout.splitlines():
+    for line in decode_output(out.stdout).splitlines():
         parts = line.split()
         if len(parts) >= 2:
             host = parts[-1].strip().rstrip(".")

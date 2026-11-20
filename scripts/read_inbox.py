@@ -20,9 +20,12 @@ flagged) and the most recent N messages are fetched (--limit, default
                contain the words "delivery" or "failure" (a delivery
                schedule, a failure-rate question) are replies, not
                bounces.
-- unsubscribe: the body asks to unsubscribe or stop contact
-               (unsubscribe / stop / remove me / do not contact /
-               opt out).
+- unsubscribe: the subject or the body asks to unsubscribe or stop
+               contact (unsubscribe / remove me / do not contact /
+               opt out). The subject counts because the mailto
+               List-Unsubscribe header scripts/send_mail.py emits
+               produces exactly that shape when a recipient clicks it:
+               subject "unsubscribe", empty body.
 - reply:       everything else.
 
 Classified entries are appended to data/outreach-feedback.json in that
@@ -33,6 +36,15 @@ on lead rows in data/leads.jsonl when that file exists; unmatched
 messages are recorded with an empty company so a human can match them.
 Messages already recorded (same sender, subject, and date) are skipped,
 so re-running the script does not duplicate entries.
+
+Unsubscribe senders are also appended to config/blocklist.json
+automatically (address and domain, reason "unsubscribe"), which
+closes the loop: scripts/send_mail.py refuses blocklisted recipients,
+so an unsubscribed address is never mailed again. A failed blocklist
+write only prints a warning; it never aborts the inbox run. Bounce
+addresses are NOT auto-blocklisted: the sending side already refuses
+them by reading the feedback log, and the blocklist stays a
+human-curated list plus confirmed unsubscribes.
 """
 import argparse
 import email
@@ -122,9 +134,58 @@ def classify(from_addr, subject, body, is_dsn=False):
     if any(phrase in low_subject for phrase in BOUNCE_SUBJECTS):
         return "bounce"
     low_body = body.lower()
-    if any(word in low_body for word in UNSUB_WORDS):
+    if any(word in low_subject or word in low_body for word in UNSUB_WORDS):
         return "unsubscribe"
     return "reply"
+
+
+def default_blocklist_path():
+    """The operator's blocklist: config/blocklist.json in the repo."""
+    return os.path.join(_config.repo_root(), "config", "blocklist.json")
+
+
+def add_to_blocklist(path, email_addr, company, date_str):
+    """Append an unsubscribe entry for this sender. True when added.
+
+    The entry carries both the address and its domain so the sending
+    side refuses the person and the company alike (the docs/06
+    promise: an unsubscribed address and company leave every future
+    batch). An address already covered — by an entry naming the
+    address, or by an unsubscribe entry naming its domain — is not
+    added twice. Raises OSError / ValueError on write problems; the
+    caller downgrades those to a warning.
+    """
+    addr = (email_addr or "").strip().lower()
+    if not addr or "@" not in addr:
+        return False
+    domain = addr.rsplit("@", 1)[-1]
+    data = {"entries": []}
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        if not isinstance(data, dict):
+            data = {"entries": []}
+    entries = data.setdefault("entries", [])
+    for entry in entries:
+        if (entry.get("email") or "").strip().lower() == addr:
+            return False
+        if (entry.get("domain") or "").strip().lower() == domain \
+                and entry.get("reason") == "unsubscribe":
+            return False
+    entries.append({
+        "added_at": date_str,
+        "company": company or "",
+        "country": "",
+        "domain": domain,
+        "email": addr,
+        "reason": "unsubscribe",
+        "note": "Added automatically by read_inbox.py: this address "
+                "asked to unsubscribe.",
+    })
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, ensure_ascii=False, indent=2)
+    return True
 
 
 def main():
@@ -137,6 +198,9 @@ def main():
                         help="Feedback file path (default data/outreach-feedback.json).")
     parser.add_argument("--leads", default=None,
                         help="Leads file for company matching (default data/leads.jsonl).")
+    parser.add_argument("--blocklist", default=None,
+                        help="Blocklist file unsubscribe senders are "
+                             "appended to (default config/blocklist.json).")
     args = parser.parse_args()
 
     host = os.environ.get("IMAP_HOST", "")
@@ -223,10 +287,25 @@ def main():
                     exist_ok=True)
         with open(feedback_path, "w", encoding="utf-8") as fh:
             json.dump(feedback, fh, ensure_ascii=False, indent=2)
+    blocklist_path = args.blocklist or default_blocklist_path()
+    blocklisted = 0
+    for entry in fetched:
+        if entry["type"] != "unsubscribe":
+            continue
+        try:
+            if add_to_blocklist(blocklist_path, entry["email"],
+                                entry["company"], entry["date"]):
+                blocklisted += 1
+        except (OSError, ValueError) as exc:
+            print(f"WARNING: could not add {entry['email']} to the "
+                  f"blocklist ({blocklist_path}): {exc}",
+                  file=sys.stderr)
+
     counts = {}
     for entry in fetched:
         counts[entry["type"]] = counts.get(entry["type"], 0) + 1
     print(json.dumps({"fetched": len(fetched), "added": added,
+                      "blocklisted": blocklisted,
                       "by_type": counts}, ensure_ascii=False))
     return 0
 

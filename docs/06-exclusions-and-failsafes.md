@@ -10,6 +10,8 @@ Three layers, all checked before scanning, enriching, and sending. A match at an
 
 Companies that must never be contacted: existing customers, companies that asked not to be contacted, hard-bounce domains you have retired, and anyone a human has manually barred. Matching is by domain first, then by company name plus country. Structure and one fictional entry: `config/blocklist.example.json`. The mechanism is the deliverable; the contents are yours and stay private.
 
+This layer is enforced in code at send time, not only in prose: `scripts/send_mail.py` refuses any recipient whose address or domain appears in a blocklist entry (entries may carry an `email`, a `domain`, or both), and `scripts/read_inbox.py` appends unsubscribe senders automatically — address and domain, reason `unsubscribe` — so the promise below, that an unsubscribed address and company leave every future batch, holds without a human moving data between files.
+
 ### Layer 2 — Excluded markets (`excluded_markets` in config)
 
 Markets you choose not to serve, each with your own reason recorded next to it. Reasons are business decisions, for example payment risk, logistics cost, regulatory burden, or a deliberate focus choice. List the market and the reason in config; the pipeline treats the whole market as out of scope for scanning, enrichment, and sending. Review the list at the monthly review: a market excluded for a temporary reason may belong back in scope.

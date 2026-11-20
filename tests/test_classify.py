@@ -72,6 +72,20 @@ class TestClassify(unittest.TestCase):
                      "Please unsubscribe me from these emails."),
             "unsubscribe")
 
+    def test_unsubscribe_subject_empty_body_is_unsubscribe(self):
+        # The mailto List-Unsubscribe header send_mail.py emits produces
+        # exactly this shape when a recipient clicks it: the subject is
+        # "unsubscribe" and the body is empty. Scanning only the body
+        # classified it as a reply, so the opt-out never took effect.
+        self.assertEqual(
+            classify("buyer@example.com", "unsubscribe", ""),
+            "unsubscribe")
+
+    def test_unsubscribe_me_subject_is_unsubscribe(self):
+        self.assertEqual(
+            classify("buyer@example.com", "Unsubscribe me", ""),
+            "unsubscribe")
+
     def test_plain_reply_is_reply(self):
         self.assertEqual(
             classify("buyer@example.com", "Re: wholesale terms",

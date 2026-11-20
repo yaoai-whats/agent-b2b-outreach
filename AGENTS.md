@@ -40,12 +40,12 @@ Shared scripts:
 - `scripts/hunter_pool.py` — Hunter API calls with key rotation. Keys come from the environment variable named in config (`hunter_api_keys_env`). Never print a key.
 - `scripts/quality_gate.py` — deterministic letter checks. A letter that fails the gate does not ship.
 - `scripts/letter_builder.py` — builds a letter from the templates with per-company variant rotation. The observation sentence comes from the lead row's researched `observation` field; the script never invents one.
-- `scripts/send_mail.py` — sends gate-passed letters over SMTP, one at a time or as a spaced batch (`--batch`). Credentials come from environment variables only (`SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`/`SMTP_FROM`); it refuses unverified recipients, enforces the daily cap and the bounce circuit breaker, and is a dry run unless `--send` is given. The From address resolves as SMTP_FROM > config `sender_email` > SMTP_USER; port 465 (or `SMTP_USE_SSL=1`) uses implicit TLS, other ports STARTTLS.
-- `scripts/read_inbox.py` — reads the sending mailbox over IMAP (`IMAP_HOST`/`IMAP_USER`/`IMAP_PASS`), read-only, and classifies replies, bounces, and unsubscribes into the feedback log.
+- `scripts/send_mail.py` — sends gate-passed letters over SMTP, one at a time or as a spaced batch (`--batch`). Credentials come from environment variables only (`SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`/`SMTP_FROM`); five mandatory checks refuse unverified recipients and anyone excluded (blocklist match, already contacted, unsubscribed, or previously bounced), enforce the daily cap and the bounce circuit breaker, and it is a dry run unless `--send` is given. Batch mode screens excluded rows out up front and counts them in the run summary. The From address resolves as SMTP_FROM > config `sender_email` > SMTP_USER; port 465 (or `SMTP_USE_SSL=1`) uses implicit TLS, other ports STARTTLS.
+- `scripts/read_inbox.py` — reads the sending mailbox over IMAP (`IMAP_HOST`/`IMAP_USER`/`IMAP_PASS`), read-only, and classifies replies, bounces, and unsubscribes into the feedback log. Unsubscribe senders are appended to `config/blocklist.json` automatically (address and domain), so later sends refuse them.
 - `scripts/dedupe.py` — merges duplicate lead rows on domain, merging emails and reporting conflicts; writes back only with `--write`.
 - `scripts/render.py` — renders `leads.jsonl` into a ranked Markdown table.
 - `scripts/build_tracker.py` — builds the follow-up tracker CSV from lead, send, and feedback state.
-- `tests/` — standard-library unittest regression tests for the inbox classifier, the quality gate, and the domain-check output parsers. Run `python3 -m unittest discover -s tests` after changing any script; all tests must pass before the change is used.
+- `tests/` — standard-library unittest regression tests for the inbox classifier, the quality gate, the domain-check output parsers and subprocess decoding, and the send-path exclusion checks. Run `python3 -m unittest discover -s tests` after changing any script; all tests must pass before the change is used.
 
 ## Capability requirements & the search layer (important)
 
