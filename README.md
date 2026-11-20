@@ -31,6 +31,11 @@
 ## 快速开始
 
 ```bash
+# 0. 先跑上手问询（第一次使用必做）：让执行 Agent 读 prompts/00-onboarding.md，
+#    它会逐项问清你的产品、市场、买家、发件人、发送政策与排除规则，
+#    把答案写进 config/config.json 与 config/blocklist.json，并输出配置核对清单。
+#    不许跳过这一步直接套用示例值。
+
 # 1. 复制并编辑配置（真实 config 永远不要提交进仓库）
 cp config/config.example.json config/config.json
 #    改：产品、关键词、HS 编码、目标市场、发件人信息、每日发送上限
@@ -64,7 +69,11 @@ python3 scripts/build_tracker.py --help
 
 - `search` 子命令：按关键词找公司、找人，可带 `--country` / `--lang`；
 - `exact` 子命令：候选邮箱原样加引号全网精确搜索，公开出现过才算验实；
-- `fetch` 子命令：打开官网、目录、海关数据页读原文，只看搜索摘要不许下结论。
+- `fetch` 子命令：打开官网、目录、海关数据页读原文，只看搜索摘要不许下结论；
+- `maps` 子命令：地图渠道找本地买家（有 Serper Key 时走地图端点，其他搜索商回退普通搜索并在输出里标明）；
+- `trade` 子命令：查贸易数据站的公开页面（这类站点没有公开 API，只能拿到搜索引擎可见的页面，须打开核实，不能当已验证的贸易记录）。
+
+域名层面的两项检查（MX 查询、accept-all 探测）由 `scripts/domain_check.py` 用纯标准库实现，是生成候选邮箱之前必跑的步骤，见 `docs/03-email-verification.md`。发送与收件也都有仓库内脚本：`scripts/send_mail.py`（SMTP 发送，凭据只走环境变量，默认 dry-run，自带收件人状态校验、每日上限与退信熔断）和 `scripts/read_inbox.py`（IMAP 只读拉取并分类回复、退信、退订）。
 
 脚本按顺序用第一个配置好的搜索 API：`SERPER_API_KEY`（Serper，Google 索引，验邮箱精确匹配最稳）→ `TAVILY_API_KEY` → `BRAVE_API_KEY`，三家都有免费额度，配任意一个即可。一个都没配时脚本会退出并给出 FALLBACK 提示，此时才许用 Agent 自带搜索顶上，但要在运行日志注明“搜索层降级”，验真结果降一档处理。
 
@@ -72,7 +81,7 @@ python3 scripts/build_tracker.py --help
 
 ## 配置说明
 
-所有业务变量只放一个文件：`config/config.json`（从 `config/config.example.json` 复制）。
+业务变量集中在一个文件：`config/config.json`（从 `config/config.example.json` 复制）。这不是一句口号：全部脚本都通过 `scripts/_config.py` 真读这个文件，发件人、产品、每日上限、熔断阈值都从这里取；单个脚本的命令行参数可以临时覆盖 config 的值。第一次使用时不要手填，先跑第 0 步的问询环节（`prompts/00-onboarding.md`），由执行 Agent 问清后写入。
 
 - **产品**：`product`、`product_keywords`、`hs_codes`、`value_points`
 - **市场**：`target_markets`、`excluded_markets`（你自己选择不做的市场，逐个写明原因）
@@ -98,8 +107,8 @@ python3 scripts/build_tracker.py --help
 │   ├── README.md              leads.jsonl 字段说明
 │   └── leads.example.jsonl    3 家虚构示例公司
 ├── docs/                      方法、评分、验证、信件、跟进、防线六篇
-├── prompts/                   五个阶段各一份平台无关的提示词
-├── scripts/                   搜索层、Hunter 轮换、质检门、信件生成、总表、跟进表
+├── prompts/                   第 0 步问询 + 五个阶段各一份平台无关的提示词
+├── scripts/                   配置加载、搜索层、域名检查、Hunter 轮换、质检门、信件生成、发送、收件箱、去重、总表、跟进表
 └── templates/
     └── letter-templates.md    开发信填空模板（标准版 + 渠道伙伴版）
 ```
@@ -107,7 +116,7 @@ python3 scripts/build_tracker.py --help
 ## 安全与合规
 
 - **只用公开信息**：这套系统只使用公司自己公开的信息——官网、公开目录、展会名单、公开贸易数据。不要使用泄露的、无合法来源购买的、或绕过登录抓取的个人数据。
-- **遵守每个目标市场的反垃圾邮件法规**：各国要求不同（退订与身份披露、商业地址公示、部分法域更严格的事先同意规则）。发送前先核对 `target_markets` 里每个市场的规则，收到退订立即执行，退信或退订过的地址永不再发。
+- **遵守每个目标市场的反垃圾邮件法规**：各国要求不同（退订与身份披露、商业地址公示、部分法域更严格的事先同意规则）。发送前先核对 `target_markets` 里每个市场的规则，收到退订立即执行，退信或退订过的地址永不再发。特别注意德国：UWG 下 B2B 冷邮件原则上要求事先同意，是常见目标市场里风险最高的一个；各市场口径对照见 `docs/06-exclusions-and-failsafes.md` 的市场法规一节。
 - **密钥只放环境变量**：API 密钥、密码、邮箱凭据绝不写进配置文件、提示词、日志或仓库；`config/config.json` 与 `.env` 默认已被 git 忽略。
 - **商务承诺必须人工确认**：Agent 绝不允许在回复里自行报价、承诺库存、交期、独家或付款条件，这些一律由人决定（清单见 AGENTS.md）。
 - **尊重发送上限**：发送量逐步爬坡，守住 `daily_send_cap`，退信熔断触发就自动停发（见 `docs/06-exclusions-and-failsafes.md`）。

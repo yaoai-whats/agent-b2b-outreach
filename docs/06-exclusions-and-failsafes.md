@@ -47,6 +47,16 @@ While stopped: no batch is prepared or sent, the inbox stage keeps running, and 
 
 Commercial commitments in replies (pricing, stock, dates, exclusivity, terms) are never made by the executing agent. The full list is in `AGENTS.md`. When in doubt, the agent drafts and waits.
 
+## Market regulations (read before the first send to any market)
+
+Cold outreach rules differ sharply by market, and this system does not replace legal judgement. Confirm the current rules for every target market separately before sending to it; the notes below are orientation, not advice.
+
+- **Germany (UWG):** B2B cold email generally requires the recipient's prior consent; unsolicited outreach carries the highest legal risk of the common target markets, including warning letters from competitors. Treat Germany as opt-in unless you have confirmed a specific lawful basis.
+- **United States (CAN-SPAM):** an opt-out regime. Commercial email is permitted without prior consent if it carries truthful headers, a real postal address, and a working unsubscribe that is honoured promptly.
+- **United Kingdom (PECR):** corporate subscribers are treated more leniently than individuals, and B2B email to company addresses is often workable with a clear opt-out, but sole traders and partnerships count as individuals and the rules still need checking per list.
+
+The pattern behind the differences: some markets are opt-in, some are opt-out, and several split by whether the recipient is a company or a person. Record the basis you confirmed for each market in your private notes before its first batch, and re-check when rules change.
+
 ## Audit habit
 
 Every skip, stop, and override writes a reason to the lead row or the feedback log. At the monthly review, sample the exclusion decisions: false exclusions cost pipeline, missed exclusions cost reputation, and the second is worse.

@@ -21,8 +21,8 @@ You are the executing agent running Stage 3 of the B2B Outreach System in this r
 2. **Write one letter per company** with `scripts/letter_builder.py` and the templates: a specific observation from public information only, one buyer-side value sentence (see config for value points), one call to action. Choose the letter language by the market mapping in config.
 3. **Gate every letter** with `scripts/quality_gate.py`. A failing letter leaves the batch; list it in the report with the failure reasons. Never hand-override a gate failure.
 4. **Brief before sending.** Produce a batch brief: for each letter, company, country, tier, recipient name and role, recipient address and its verification label, and the observation used. The brief informs the operator; sending then proceeds under the operator's standing instruction unless the operator stops a letter or the batch.
-5. **Send** spread across each recipient's local business hours, within the cap (see config), using the sending method the operator configured outside this repository.
-6. **Verify and record.** After sending, confirm each letter appears in the sent record, then write back to `data/leads.jsonl` and the send log: company, address, date and time, template variant, letter language.
+5. **Send** with `scripts/send_mail.py`, spread across each recipient's local business hours, within the cap (see config). The script sends over SMTP with credentials from environment variables only (`SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`/`SMTP_FROM`); run it once per letter, dry-run first (its default) to review, then with `--send`. It re-checks the recipient's verification label, the quality gate, the daily cap, and the bounce circuit breaker on every call and refuses with a reason when a check fails; a refusal ends that letter, never gets overridden.
+6. **Verify and record.** After sending, confirm each letter appears in `data/send-log.jsonl` and `data/send-state.json` (both written by `scripts/send_mail.py`), then write back to `data/leads.jsonl`: company, address, date and time, template variant, letter language.
 
 ## Output
 

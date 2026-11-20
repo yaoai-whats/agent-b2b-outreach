@@ -10,12 +10,12 @@ You are the executing agent running Stage 4 of the B2B Outreach System in this r
 
 ## Inputs
 
-- The sending mailbox (access method configured by the operator outside this repository).
+- The sending mailbox, read with `scripts/read_inbox.py` (IMAP, credentials from the environment variables `IMAP_HOST`/`IMAP_USER`/`IMAP_PASS`; the mailbox is opened read-only). Its output classifies new mail into bounces, unsubscribes, and replies and appends them to the feedback log; use it as the collection step, then apply the judgement below.
 - `data/leads.jsonl`, the send log, and the feedback log.
 
 ## Task
 
-1. **Collect** everything new since the last inbox run: replies, bounce notifications, unsubscribe requests, out-of-office messages.
+1. **Collect** everything new since the last inbox run by running `scripts/read_inbox.py`: replies, bounce notifications, unsubscribe requests, out-of-office messages. Review its automatic classification before writing anything back; reclassify anything it got wrong (for example an out-of-office reply it filed as a substantive reply).
 2. **Classify** each item and match it to a company by exact company identity and address, never by a partial name match:
    - Substantive reply (interest, questions, referral to another person)
    - Negative reply (not interested, wrong person with no referral)

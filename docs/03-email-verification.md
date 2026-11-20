@@ -57,3 +57,19 @@ Some mail servers accept every address at the domain and discard unknown mailbox
 2. Accept-all probe: determines which labels are even achievable for this domain.
 
 Run both before generating candidates. Guessing first and verifying later wastes most of the verification budget on addresses that were never plausible.
+
+Both checks are implemented in `scripts/domain_check.py` (pure standard library, no dependencies):
+
+```bash
+python3 scripts/domain_check.py example.com
+# {"domain": "example.com", "domain_mx": ["mx1.example.com", ...],
+#  "domain_accept_all": true | false | "unknown"}
+
+python3 scripts/domain_check.py --leads data/leads.jsonl --write
+# fills domain_mx / domain_accept_all on every row that is missing them
+```
+
+The MX lookup is a hand-built DNS query over UDP with a system `nslookup` fallback. The accept-all probe opens a short SMTP conversation with the first MX host and asks about a random non-existent address. Two practical warnings:
+
+- **Port 25 is often blocked** (many networks, cloud hosts, and mail providers refuse outbound or inbound SMTP probing). A failed probe is recorded as `"unknown"` (stored as `null` on the lead row), never as a guess in either direction. An `unknown` accept-all result means the paid verifier's accept-all flag and real bounce data carry the decision for that domain.
+- The two checks stay independent on purpose: a domain can have valid MX records and still be accept-all, and the probe result never changes the MX result.

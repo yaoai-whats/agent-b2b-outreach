@@ -7,10 +7,19 @@ This file is the entry point for the executing agent. Read it first, in full, be
 ## Reading order
 
 1. `AGENTS.md` (this file) — map, stage contracts, hard rules.
-2. `config/config.example.json` and the operator's private `config/config.json` — every business variable.
-3. `docs/01-methodology.md` — the ten-step method behind the pipeline.
-4. The stage prompt you are about to run (`prompts/01-scan.md` … `prompts/05-followup.md`).
-5. The supporting doc for that stage (scoring: `docs/02-tier-scoring.md`; verification: `docs/03-email-verification.md`; letters: `docs/04-letter-rules.md`; follow-ups: `docs/05-followup-policy.md`; exclusions and failsafes: `docs/06-exclusions-and-failsafes.md`).
+2. `prompts/00-onboarding.md` — if `config/config.json` does not exist yet, run Step 0 first and do nothing else until it is done.
+3. `config/config.example.json` and the operator's private `config/config.json` — every business variable.
+4. `docs/01-methodology.md` — the ten-step method behind the pipeline.
+5. The stage prompt you are about to run (`prompts/01-scan.md` … `prompts/05-followup.md`).
+6. The supporting doc for that stage (scoring: `docs/02-tier-scoring.md`; verification: `docs/03-email-verification.md`; letters: `docs/04-letter-rules.md`; follow-ups: `docs/05-followup-policy.md`; exclusions and failsafes: `docs/06-exclusions-and-failsafes.md`).
+
+## Step 0 — Onboarding (runs once, before everything)
+
+| Step | Prompt | Reads | Writes | Done when |
+|---|---|---|---|---|
+| 0. Onboarding | `prompts/00-onboarding.md` | The operator's answers (interview) | `config/config.json`, `config/blocklist.json` | Every required field holds the operator's real value (never an example value), the self-check passes, and the operator has seen the configuration checklist |
+
+No stage runs before Step 0 is complete. Business parameters are asked, not assumed: if the operator has not provided a value, it stays empty and is reported as missing.
 
 ## Five-stage map
 
@@ -24,10 +33,15 @@ This file is the entry point for the executing agent. Read it first, in full, be
 
 Shared scripts:
 
+- `scripts/_config.py` — the one config loader every other script uses. It reads `config/config.json` (falling back to `config/config.example.json`); command-line arguments override config values.
 - `scripts/web_search.py` — unified search layer (see “Capability requirements” below). All discovery and exact-match verification should go through it.
+- `scripts/domain_check.py` — MX lookup and accept-all probe for a domain (the two checks `docs/03-email-verification.md` requires before candidate work), pure standard library.
 - `scripts/hunter_pool.py` — Hunter API calls with key rotation. Keys come from the environment variable named in config (`hunter_api_keys_env`). Never print a key.
 - `scripts/quality_gate.py` — deterministic letter checks. A letter that fails the gate does not ship.
-- `scripts/letter_builder.py` — builds a letter from the templates with per-company variant rotation.
+- `scripts/letter_builder.py` — builds a letter from the templates with per-company variant rotation. The observation sentence comes from the lead row's researched `observation` field; the script never invents one.
+- `scripts/send_mail.py` — sends one gate-passed letter over SMTP. Credentials come from environment variables only (`SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`/`SMTP_FROM`); it refuses unverified recipients, enforces the daily cap and the bounce circuit breaker, and is a dry run unless `--send` is given.
+- `scripts/read_inbox.py` — reads the sending mailbox over IMAP (`IMAP_HOST`/`IMAP_USER`/`IMAP_PASS`), read-only, and classifies replies, bounces, and unsubscribes into the feedback log.
+- `scripts/dedupe.py` — merges duplicate lead rows on domain, merging emails and reporting conflicts; writes back only with `--write`.
 - `scripts/render.py` — renders `leads.jsonl` into a ranked Markdown table.
 - `scripts/build_tracker.py` — builds the follow-up tracker CSV from lead, send, and feedback state.
 

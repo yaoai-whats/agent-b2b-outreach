@@ -13,9 +13,10 @@ Checks:
 6. Body within the word limit; optional rendered link within its limit.
 
 Word lists are defaults only. Extend them per language and per business by
-editing the lists below or by pointing QUALITY_GATE_EXTRA (a JSON file with
-optional keys "snooping_words", "spam_phrases", "risk_claims") at your own
-additions.
+editing the lists below, by adding a "risk_claims" / "spam_phrases" /
+"snooping_words" list to your config (read via scripts/_config.py), or by
+pointing QUALITY_GATE_EXTRA (a JSON file with the same optional keys) at
+your own additions.
 
 Usage:
     from quality_gate import check_email
@@ -44,8 +45,17 @@ SPAM_PHRASES = ["best price", "cheapest", "guaranteed", "risk-free",
                 "free quote", "dear sir", "dear madam",
                 "to whom it may concern", "lowest price"]
 
-RISK_CLAIMS = ["certified", "exclusive distributor", "in stock",
-               "existing customer", "approved supplier", "number one"]
+# Unverifiable absolute claims. These are deliberately precise phrases:
+# a bare word like "certified" or "in stock" is a normal, checkable fact
+# in many industries (a product can genuinely carry a certification, a
+# warehouse can genuinely hold stock), so only the absolute, unprovable
+# formulations are gated.
+RISK_CLAIMS = ["guaranteed certified", "certification guaranteed",
+               "fully certified", "always in stock", "guaranteed delivery",
+               "best price", "cheapest", "lowest price guaranteed",
+               "number one", "risk-free", "100% guaranteed",
+               "exclusive distributor", "existing customer",
+               "approved supplier"]
 
 MAX_WORDS = 130
 MAX_URL = 1800
@@ -63,6 +73,16 @@ _EXTRA = _load_extra()
 SNOOPING_WORDS += _EXTRA.get("snooping_words", [])
 SPAM_PHRASES += _EXTRA.get("spam_phrases", [])
 RISK_CLAIMS += _EXTRA.get("risk_claims", [])
+
+# The operator's config may carry the same extension lists; they are
+# appended exactly like the QUALITY_GATE_EXTRA file above.
+try:
+    import _config as _cfg
+    SNOOPING_WORDS += _cfg.get("snooping_words", []) or []
+    SPAM_PHRASES += _cfg.get("spam_phrases", []) or []
+    RISK_CLAIMS += _cfg.get("risk_claims", []) or []
+except Exception:  # noqa: BLE001 - config is optional for the gate
+    pass
 
 
 def check_email(name, subject, body, url_len=0):

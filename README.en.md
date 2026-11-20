@@ -31,6 +31,13 @@ See `AGENTS.md` for the agent operating map, `docs/01-methodology.md` for the fu
 ## Quick Start
 
 ```bash
+# 0. Run onboarding first (required for a new operator): have the executing
+#    agent read prompts/00-onboarding.md. It interviews you about your
+#    product, markets, buyers, sender identity, sending policy, and
+#    exclusion rules, writes the answers into config/config.json and
+#    config/blocklist.json, and prints a configuration checklist.
+#    Never skip this and start from the example values.
+
 # 1. Copy and edit the config (never commit your real config)
 cp config/config.example.json config/config.json
 #    Edit: product, keywords, HS codes, markets, sender identity, caps.
@@ -59,7 +66,9 @@ To run the pipeline with an AI agent, give the agent `AGENTS.md` first, then han
 
 ## Configuration
 
-All business-specific values live in one file: `config/config.json` (start from `config/config.example.json`).
+Business-specific values are centralised in one file: `config/config.json` (start from `config/config.example.json`). This is enforced, not aspirational: every script reads the file through `scripts/_config.py` (sender identity, product, daily cap, breaker thresholds all come from there), and a script's command-line arguments may override config values for a single run. For a first setup, do not fill the file in by hand: run the Step 0 onboarding interview (`prompts/00-onboarding.md`) and let the executing agent ask and record the answers.
+
+Domain-level checks (MX lookup and the accept-all probe) are implemented in `scripts/domain_check.py` with the standard library only. Sending and inbox processing are in-repo too: `scripts/send_mail.py` (SMTP, credentials from environment variables only, dry-run by default, with recipient-status, daily-cap, and bounce-breaker checks built in) and `scripts/read_inbox.py` (read-only IMAP fetch that classifies replies, bounces, and unsubscribes).
 
 Key groups:
 
@@ -86,8 +95,8 @@ Key groups:
 │   ├── README.md              leads.jsonl field reference
 │   └── leads.example.jsonl    Exactly 3 fictional sample companies
 ├── docs/                      Method, scoring, verification, letter, follow-up, failsafe guides
-├── prompts/                   One platform-agnostic prompt per pipeline stage
-├── scripts/                   Hunter pool, quality gate, letter builder, renderer, tracker
+├── prompts/                   Step 0 onboarding plus one platform-agnostic prompt per pipeline stage
+├── scripts/                   Config loader, search layer, domain check, Hunter pool, quality gate, letter builder, sender, inbox reader, dedupe, renderer, tracker
 └── templates/
     └── letter-templates.md    Fill-in letter templates (standard + channel partner)
 ```
@@ -95,7 +104,7 @@ Key groups:
 ## Safety and compliance
 
 - **Public information only.** This system is designed to work from information companies publish themselves: their websites, public directories, trade-show exhibitor lists, and public trade data. Do not use leaked, purchased-without-basis, or scraped-behind-login personal data.
-- **Follow the anti-spam law of every target market.** Requirements differ by country (for example opt-out and identification rules, business-address disclosure, and stricter consent rules in some jurisdictions). Check the rules for each market in your `target_markets` before sending, honour every opt-out immediately, and never email a contact again after an unsubscribe or a hard bounce.
+- **Follow the anti-spam law of every target market.** Requirements differ by country (for example opt-out and identification rules, business-address disclosure, and stricter consent rules in some jurisdictions). Check the rules for each market in your `target_markets` before sending, honour every opt-out immediately, and never email a contact again after an unsubscribe or a hard bounce. Note Germany in particular: under the UWG, B2B cold email generally requires prior consent, making it the highest-risk common target market; see the market-regulations section of `docs/06-exclusions-and-failsafes.md`.
 - **Keys live in environment variables only.** Never write API keys, passwords, or mailbox credentials into config files, prompts, logs, or this repository. `config/config.json` and `.env` are git-ignored by default.
 - **Human confirmation for commercial commitments.** The agent must never auto-quote prices, promise stock, delivery dates, exclusivity, or payment terms in a reply. Those always need a human. See the confirmation list in `AGENTS.md`.
 - **Respect sending limits.** Ramp up gradually, respect `daily_send_cap`, and let the bounce circuit breaker stop sending automatically (see `docs/06-exclusions-and-failsafes.md`).

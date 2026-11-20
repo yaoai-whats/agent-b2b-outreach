@@ -11,6 +11,7 @@ One JSON object per line, one line per company. The file is the single living da
 | `country` | Country of the company's main buying office | String |
 | `buyer_category` | Buyer type from config | One of `buyer_categories` in config, for example `tableware wholesalers` |
 | `profile` | One or two sentences on what the company does and why it fits | String |
+| `observation` | One factual clause from the company's public information (published range, programme, or channel activity), written by the researching agent; used verbatim as the letter's observation sentence | String; a row without one is not ready for Stage 3 |
 | `source_channel` | Discovery channel | `trade_data`, `maps`, `directory`, `trade_show`, `web_search`, `distributor_network` |
 | `source_url` | Evidence link for the discovery | URL string |
 | `added_at` | Date the row entered the database | `YYYY-MM-DD` |
