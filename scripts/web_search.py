@@ -45,6 +45,11 @@ import sys
 import urllib.request
 import urllib.error
 
+try:
+    import _config  # noqa: F401  (side effect: loads repo-root .env)
+except ImportError:
+    pass
+
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36"
 
 

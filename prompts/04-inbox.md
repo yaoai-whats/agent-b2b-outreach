@@ -10,7 +10,7 @@ You are the executing agent running Stage 4 of the B2B Outreach System in this r
 
 ## Inputs
 
-- The sending mailbox, read with `scripts/read_inbox.py` (IMAP, credentials from the environment variables `IMAP_HOST`/`IMAP_USER`/`IMAP_PASS`; the mailbox is opened read-only). Its output classifies new mail into bounces, unsubscribes, and replies and appends them to the feedback log; use it as the collection step, then apply the judgement below.
+- The sending mailbox, read with `scripts/read_inbox.py` (IMAP, credentials from the environment variables `IMAP_HOST`/`IMAP_USER`/`IMAP_PASS`, loaded from the repo-root `.env` when present; the mailbox is opened read-only). Its output classifies new mail into bounces, unsubscribes, and replies and appends them to the feedback log; use it as the collection step, then apply the judgement below.
 - `data/leads.jsonl`, the send log, and the feedback log.
 
 ## Task

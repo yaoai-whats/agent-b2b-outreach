@@ -6,6 +6,24 @@
 
 > **全文示例均为虚构**：本仓库所有示例使用虚构企业 **Guangzhou BrightTable Ceramics（虚构陶瓷餐具出口商）**。使用前，请把 `config/` 里的每一个值换成你自己的业务信息。
 
+## 如果你是 AI Agent（先读这里）
+
+用户把这个仓库地址交给你、说“帮我安装并使用这个项目”时，**下面所有命令都由你来执行，不要让用户自己去敲终端**：
+
+1. 把仓库克隆或下载到用户电脑上的一个固定目录，并记住这个目录——之后所有定时任务都以它为工作目录。
+2. 通读 `AGENTS.md`，那是你的总地图；本 README 只是给人看的概览，与 `AGENTS.md` 冲突时以 `AGENTS.md` 为准。
+3. 检查 `config/config.json` 是否存在。不存在就严格按 `prompts/00-onboarding.md` 执行第 0 步问询：逐项问清用户的产品、市场、买家、发件人、发送政策与排除规则，问完之前不许跑任何阶段、不许套用示例值充数。
+4. 问询写完配置后，运行 `python3 scripts/doctor.py` 自检，有 FAIL 先修再继续；把配置核对清单给用户确认。
+5. 用户确认后，先试跑一轮扫客（Stage 1）把结果给用户看，对口了再往下走补全与备批。
+6. 用户同意长期运行后，按 `schedules.md` 里“注册定时任务”一节，用你所在平台的定时能力把各阶段注册成定时任务；你所在平台没有定时能力时，按那一节的降级办法处理，不许只口头建议用户“记得每周跑两次”。
+7. 用户给你的任何密钥、邮箱授权码，只写进仓库根目录的 `.env` 文件（已被 git 忽略，全部脚本会自动读取它），不许写进 config、不许出现在日志、简报和回复里、不许回显。
+
+用户需要准备的东西只有两样，而且等你问到那一步再要，不要一上来全索要：
+
+- **必备一**：一个专门发开发信的邮箱（不要用主业务邮箱），以及它的 SMTP / IMAP 服务器地址和授权码（在哪一步问、怎么引导用户去邮箱设置里找，见 `prompts/00-onboarding.md` 第 10 问）。
+- **必备二**：一个 Hunter 账号的 API Key（免费版每月 50 个额度，起步够用）。
+- **强烈推荐（不是必备）**：一个搜索 API Key（Serper / Tavily / Brave 任一，都有免费额度）。没有它系统也能跑，但找公司和验邮箱会降级；你要主动告诉用户去哪免费申请，他暂时拿不到就按 `AGENTS.md` 的降级规则继续，不许因此卡死第一轮。
+
 ## 这套系统解决什么问题
 
 多数中小出口商和 B2B 卖家都卡在同一件事上：目录网站卖的名单早就过期，群发模板信又容易把发件域名发废。这套系统走相反的路：
@@ -43,7 +61,8 @@ cp config/config.example.json config/config.json
 # 2. 复制黑名单结构，填入你自己的排除对象
 cp config/blocklist.example.json config/blocklist.json
 
-# 3. API 密钥只放环境变量，绝不写进任何文件
+# 3. API 密钥只放环境变量，或写进仓库根目录的 .env 文件（脚本会自动读取，
+#    .env 已被 git 忽略）；绝不写进 config，绝不提交进仓库
 export HUNTER_API_KEYS="key-one,key-two"     # Hunter 邮箱查找/验证（可选，三方轮换）
 export SERPER_API_KEY="your-key"             # 搜索层，三选一即可（Serper 优先）
 
@@ -98,7 +117,7 @@ python3 scripts/build_tracker.py --help
 - **排除规则**：`exclusion_rules`（你自己的规则，例如疑似同行、已有客户），另加 `config/blocklist.json`
 - **发件人**：`sender_name`、`sender_company`、`sender_email`、`notification_email`。实际发件地址的优先级是写死的：环境变量 `SMTP_FROM` > config 的 `sender_email` > `SMTP_USER`；前两者都设了且不一致时以 `SMTP_FROM` 为准，`scripts/doctor.py` 会给出警告
 - **发送安全**：`daily_send_cap`（每日上限）、`followup_interval_days`、`followup_max`、退信熔断阈值
-- **密钥**：`hunter_api_keys_env` 指向存放密钥的环境变量名（默认 `HUNTER_API_KEYS`），密钥本身永不进文件
+- **密钥**：`hunter_api_keys_env` 指向存放密钥的环境变量名（默认 `HUNTER_API_KEYS`）；密钥本身永不进 config，存放位置只有两个：系统环境变量，或仓库根目录的 `.env` 文件（本机私有、已被 git 忽略、全部脚本经 `scripts/_config.py` 自动读取，真实环境变量优先于 .env）
 
 ## 仓库结构
 
@@ -127,7 +146,7 @@ python3 scripts/build_tracker.py --help
 
 - **只用公开信息**：这套系统只使用公司自己公开的信息——官网、公开目录、展会名单、公开贸易数据。不要使用泄露的、无合法来源购买的、或绕过登录抓取的个人数据。
 - **遵守每个目标市场的反垃圾邮件法规**：各国要求不同（退订与身份披露、商业地址公示、部分法域更严格的事先同意规则）。发送前先核对 `target_markets` 里每个市场的规则，收到退订立即执行，退信或退订过的地址永不再发。特别注意德国：UWG 下 B2B 冷邮件原则上要求事先同意，是常见目标市场里风险最高的一个；各市场口径对照见 `docs/06-exclusions-and-failsafes.md` 的市场法规一节。
-- **密钥只放环境变量**：API 密钥、密码、邮箱凭据绝不写进配置文件、提示词、日志或仓库；`config/config.json` 与 `.env` 默认已被 git 忽略。
+- **密钥只放环境变量或 .env**：API 密钥、密码、邮箱凭据绝不写进配置文件、提示词、日志或仓库；本机存放用仓库根目录的 `.env`（脚本自动读取），`config/config.json` 与 `.env` 默认已被 git 忽略，绝不提交。
 - **商务承诺必须人工确认**：Agent 绝不允许在回复里自行报价、承诺库存、交期、独家或付款条件，这些一律由人决定（清单见 AGENTS.md）。
 - **尊重发送上限**：发送量逐步爬坡，守住 `daily_send_cap`，退信熔断触发就自动停发（见 `docs/06-exclusions-and-failsafes.md`）。
 

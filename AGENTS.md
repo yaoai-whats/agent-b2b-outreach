@@ -4,6 +4,17 @@ This file is the entry point for the executing agent. Read it first, in full, be
 
 > All business parameters (product, markets, sender identity, caps, rules) live in the private config file created from `config/config.example.json`. In this document and in every prompt, "see config" means: read the value from that config file. Never invent a business parameter that the config does not provide, and never hard-code one into a prompt, script run, or letter.
 
+## Bootstrap — when a user hands you this repository
+
+If the operator's entire instruction is this repository's URL plus "install and use this for me", that is a complete instruction. Execute it yourself; do not hand the operator a list of commands to type.
+
+1. Clone or download the repository into one fixed local directory. That directory is the working directory for everything that follows, including scheduled jobs.
+2. Read this file in full.
+3. If `config/config.json` does not exist, run Step 0 (`prompts/00-onboarding.md`) and do nothing else until it is complete.
+4. When Step 0 completes, run `python3 scripts/doctor.py`, fix every FAIL, then present the configuration checklist and wait for the operator's confirmation.
+5. Trial-run Stage 1 once and show the operator the companies it stored before running any later stage.
+6. Only after the operator agrees to continuous running, register the stages as scheduled jobs following `schedules.md`. If your host platform has no scheduling capability, use the fallback in that file and say so plainly — never leave the operator with only a verbal suggestion to run stages by hand.
+
 ## Reading order
 
 1. `AGENTS.md` (this file) — map, stage contracts, hard rules.
@@ -34,13 +45,13 @@ No stage runs before Step 0 is complete. Business parameters are asked, not assu
 Shared scripts:
 
 - `scripts/_config.py` — the one config loader every other script uses. It reads `config/config.json` (falling back to `config/config.example.json`); command-line arguments override config values.
-- `scripts/doctor.py` — one-shot self-check for a new machine or a "stopped working" report: Python version, config completeness (example placeholders are FAILs), environment variables present or absent (values never printed), DNS/MX reachability, SMTP connectivity (greeting only unless `--smtp-login`), and sender-address conflicts. Run it before the first batch on any machine.
+- `scripts/doctor.py` — one-shot self-check for a new machine or a "stopped working" report: Python version, config completeness (example placeholders are FAILs), environment variables present or absent (values never printed), DNS/MX reachability, SMTP connectivity (greeting only unless `--smtp-login`), and sender-address conflicts. Run it right after Step 0 completes, and again before the first batch on any machine.
 - `scripts/web_search.py` — unified search layer (see “Capability requirements” below). All discovery and exact-match verification should go through it.
 - `scripts/domain_check.py` — MX lookup and accept-all probe for a domain (the two checks `docs/03-email-verification.md` requires before candidate work), pure standard library.
-- `scripts/hunter_pool.py` — Hunter API calls with key rotation. Keys come from the environment variable named in config (`hunter_api_keys_env`). Never print a key.
+- `scripts/hunter_pool.py` — Hunter API calls with key rotation. Keys come from the environment variable named in config (`hunter_api_keys_env`), loaded from the repo-root `.env` when present. Never print a key.
 - `scripts/quality_gate.py` — deterministic letter checks. A letter that fails the gate does not ship.
 - `scripts/letter_builder.py` — builds a letter from the templates with per-company variant rotation. The observation sentence comes from the lead row's researched `observation` field; the script never invents one.
-- `scripts/send_mail.py` — sends gate-passed letters over SMTP, one at a time or as a spaced batch (`--batch`). Credentials come from environment variables only (`SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`/`SMTP_FROM`); five mandatory checks refuse unverified recipients and anyone excluded (blocklist match, already contacted, unsubscribed, or previously bounced), enforce the daily cap and the bounce circuit breaker, and it is a dry run unless `--send` is given. Batch mode screens excluded rows out up front and counts them in the run summary. The From address resolves as SMTP_FROM > config `sender_email` > SMTP_USER; port 465 (or `SMTP_USE_SSL=1`) uses implicit TLS, other ports STARTTLS.
+- `scripts/send_mail.py` — sends gate-passed letters over SMTP, one at a time or as a spaced batch (`--batch`). Credentials come from environment variables (`SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`/`SMTP_FROM`, loaded from the repo-root `.env` when present); five mandatory checks refuse unverified recipients and anyone excluded (blocklist match, already contacted, unsubscribed, or previously bounced), enforce the daily cap and the bounce circuit breaker, and it is a dry run unless `--send` is given. Batch mode screens excluded rows out up front and counts them in the run summary. The From address resolves as SMTP_FROM > config `sender_email` > SMTP_USER; port 465 (or `SMTP_USE_SSL=1`) uses implicit TLS, other ports STARTTLS.
 - `scripts/read_inbox.py` — reads the sending mailbox over IMAP (`IMAP_HOST`/`IMAP_USER`/`IMAP_PASS`), read-only, and classifies replies, bounces, and unsubscribes into the feedback log. Unsubscribe senders are appended to `config/blocklist.json` automatically (address and domain), so later sends refuse them.
 - `scripts/dedupe.py` — merges duplicate lead rows on domain, merging emails and reporting conflicts; writes back only with `--write`.
 - `scripts/render.py` — renders `leads.jsonl` into a ranked Markdown table.
@@ -65,7 +76,7 @@ The executing agent needs four capabilities: web search, opening and reading web
 6. **Bounce circuit breaker.** If bounces reach the thresholds in config (default: 3 or more in one day, or 15% or more of the last 20 sends), stop all sending, report, and wait for a human. See `docs/06-exclusions-and-failsafes.md`.
 7. **Sending caps and timing.** Never exceed `daily_send_cap` (see config). Spread sends across the recipient's local business hours on business days.
 8. **Follow-up discipline.** Interval and maximum count come from config (defaults: 30 days, at most 2 follow-ups). Every follow-up must carry genuinely new content. A bare nudge is not a follow-up.
-9. **Secrets stay in the environment.** API keys and credentials are read from environment variables only. Never write them to files, logs, letters, or chat output.
+9. **Secrets stay in the environment or the repo-root `.env`.** Scripts read API keys and credentials from environment variables. On a local machine, the executing agent stores the values the operator hands over in `<repo>/.env` — git-ignored, loaded automatically by `scripts/_config.py` at import, with real environment variables taking precedence. That file is the only file a secret may ever be written to. Never write a secret to config, logs, letters, or chat output, and never echo a value back to the operator.
 10. **Write everything back.** Every send, bounce, reply, and unsubscribe updates the lead row and the feedback log in the same run. The next round depends on it.
 
 ## Actions that always need human confirmation

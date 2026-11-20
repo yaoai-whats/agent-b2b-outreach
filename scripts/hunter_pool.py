@@ -29,6 +29,11 @@ import sys
 import urllib.parse
 import urllib.request
 
+try:
+    import _config  # noqa: F401  (side effect: loads repo-root .env)
+except ImportError:
+    pass
+
 BASE = "https://api.hunter.io/v2"
 KEYS_ENV = os.environ.get("HUNTER_KEYS_ENV", "HUNTER_API_KEYS")
 QUOTA_HINTS = ("quota", "credit", "limit exceeded", "too many requests", "429")

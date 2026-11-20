@@ -6,6 +6,24 @@ A reusable, config-driven pipeline for finding B2B buyers, verifying decision-ma
 
 > **Fictional example throughout:** All examples in this repository use a fictional company, **Guangzhou BrightTable Ceramics** (fictional example), a fictional exporter of ceramic tableware sets. Replace every value in `config/` with your own business before use.
 
+## If you are an AI agent (read this first)
+
+When the user hands you this repository's URL and says "install and use this project for me", **run every command yourself — never hand the user a list of terminal commands to type**:
+
+1. Clone or download the repository into one fixed directory on the user's machine and remember it — every scheduled job later uses it as its working directory.
+2. Read `AGENTS.md` in full; it is your operating map. This README is only a human overview, and `AGENTS.md` wins on any conflict.
+3. Check whether `config/config.json` exists. If it does not, run Step 0 exactly as written in `prompts/00-onboarding.md`: interview the user about product, markets, buyers, sender identity, sending policy, and exclusion rules. Run no pipeline stage before the interview is done, and never fill gaps with example values.
+4. After the interview writes the config, run `python3 scripts/doctor.py`; fix every FAIL before continuing, then show the user the configuration checklist for confirmation.
+5. Once confirmed, trial-run one scan round (Stage 1) and show the user the results before moving on to enrichment and batching.
+6. When the user agrees to run the system continuously, register the stages as scheduled jobs using your host platform's scheduling capability, following the "Registering scheduled jobs" section of `schedules.md`. If your platform has no scheduler, follow the fallback in that section — never just advise the user to "remember to run it twice a week".
+7. Any key or mailbox app password the user gives you goes only into the repo-root `.env` file (git-ignored; every script loads it automatically). Never put secrets in config, logs, briefs, or replies, and never echo them back.
+
+The user only needs to prepare two things, and you should ask for each only when its step arrives:
+
+- **Required 1:** a dedicated sending mailbox (not the main business mailbox) with its SMTP / IMAP server addresses and app password (see question 10 of `prompts/00-onboarding.md` for how to guide the user to find them).
+- **Required 2:** a Hunter account API key (the free tier's 50 monthly credits are enough to start).
+- **Strongly recommended, not required:** one search API key (Serper, Tavily, or Brave — all have free tiers). Without it the system still runs, but company discovery and email verification run degraded; tell the user where to get one for free, and if they cannot, continue under the fallback rules in `AGENTS.md` instead of stalling the first round.
+
 ## What this system does
 
 Most small exporters and B2B sellers face the same problem: directories sell stale lists, and generic cold email burns your domain. This system takes the opposite approach:
@@ -45,7 +63,9 @@ cp config/config.example.json config/config.json
 # 2. Copy the blocklist structure and add your own exclusions
 cp config/blocklist.example.json config/blocklist.json
 
-# 3. Put API keys in the environment only (never in files)
+# 3. Put API keys in environment variables, or in the repo-root .env file
+#    (scripts load it automatically and it is git-ignored). Never put keys
+#    in config, and never commit them.
 export HUNTER_API_KEYS="key-one,key-two"
 
 # 4. Run the self-check: Python version, config still on example values,
@@ -88,7 +108,7 @@ Key groups:
 - **Exclusions:** `exclusion_rules` (your own rules, for example suspected competitors or existing customers), plus `config/blocklist.json`
 - **Sender:** `sender_name`, `sender_company`, `sender_email`, `notification_email`. The actual From address follows a fixed priority: the `SMTP_FROM` environment variable > `sender_email` in config > `SMTP_USER`; when the first two are both set and differ, `SMTP_FROM` wins and `scripts/doctor.py` warns about it
 - **Sending safety:** `daily_send_cap`, `followup_interval_days`, `followup_max`, bounce circuit-breaker thresholds
-- **Keys:** `hunter_api_keys_env` names the environment variable that holds your keys (`HUNTER_API_KEYS` by default)
+- **Keys:** `hunter_api_keys_env` names the environment variable that holds your keys (`HUNTER_API_KEYS` by default). Keys never live in config; the only two homes are real environment variables or the repo-root `.env` file (local, git-ignored, loaded automatically by every script through `scripts/_config.py`; real environment variables win over `.env`)
 
 ## Repository layout
 
@@ -116,7 +136,7 @@ Key groups:
 
 - **Public information only.** This system is designed to work from information companies publish themselves: their websites, public directories, trade-show exhibitor lists, and public trade data. Do not use leaked, purchased-without-basis, or scraped-behind-login personal data.
 - **Follow the anti-spam law of every target market.** Requirements differ by country (for example opt-out and identification rules, business-address disclosure, and stricter consent rules in some jurisdictions). Check the rules for each market in your `target_markets` before sending, honour every opt-out immediately, and never email a contact again after an unsubscribe or a hard bounce. Note Germany in particular: under the UWG, B2B cold email generally requires prior consent, making it the highest-risk common target market; see the market-regulations section of `docs/06-exclusions-and-failsafes.md`.
-- **Keys live in environment variables only.** Never write API keys, passwords, or mailbox credentials into config files, prompts, logs, or this repository. `config/config.json` and `.env` are git-ignored by default.
+- **Keys live in environment variables or the repo-root `.env` only.** Never write API keys, passwords, or mailbox credentials into config files, prompts, logs, or this repository. `config/config.json` and `.env` are git-ignored by default and must never be committed.
 - **Human confirmation for commercial commitments.** The agent must never auto-quote prices, promise stock, delivery dates, exclusivity, or payment terms in a reply. Those always need a human. See the confirmation list in `AGENTS.md`.
 - **Respect sending limits.** Ramp up gradually, respect `daily_send_cap`, and let the bounce circuit breaker stop sending automatically (see `docs/06-exclusions-and-failsafes.md`).
 
@@ -130,4 +150,4 @@ MIT. See `LICENSE`.
 
 这是一套可复用的 B2B 获客流水线：先写清理想客户画像，再从“正在买的人”入手多渠道找公司，找到具名决策人并验证邮箱后，按契合度、可触达度、证据强度三维打分，最后发送经过质检的个性化开发信，并把退信与回复回写到评分里形成闭环。
 
-仓库内所有示例均为虚构企业 Guangzhou BrightTable Ceramics（虚构陶瓷餐具出口商）。使用前把 `config/config.example.json` 复制为你自己的配置，填入你的产品、市场、发件人信息与发送上限；API 密钥只放环境变量，不要写进任何文件。带 AI 智能体运行时，先让它读 `AGENTS.md`，再按 `prompts/` 里五个阶段逐段执行。发送前请自行确认目标市场适用的反垃圾邮件法规，并立即尊重一切退订请求。
+仓库内所有示例均为虚构企业 Guangzhou BrightTable Ceramics（虚构陶瓷餐具出口商）。使用前把 `config/config.example.json` 复制为你自己的配置，填入你的产品、市场、发件人信息与发送上限；API 密钥只放环境变量或仓库根目录的 `.env`（脚本自动读取、已被 git 忽略），不要写进 config 或提交进仓库。如果你是 AI Agent，先读本页顶部的 Agent 启动说明，再通读 `AGENTS.md` 并从第 0 步问询开始，所有命令由你执行。带 AI 智能体运行时，先让它读 `AGENTS.md`，再按 `prompts/` 里五个阶段逐段执行。发送前请自行确认目标市场适用的反垃圾邮件法规，并立即尊重一切退订请求。

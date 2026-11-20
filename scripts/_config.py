@@ -15,6 +15,10 @@ Usage from other scripts in this directory:
 Command-line arguments in each script override config values; config
 values override the example file. Nothing business-specific is hard-coded
 in any script.
+
+Importing this module also loads the repo-root `.env` file (if present)
+into the environment without overriding variables already set, so secrets
+the operator stored there reach every script. See `_load_dotenv`.
 """
 import json
 import os
@@ -25,6 +29,46 @@ _CACHE = None
 def repo_root():
     """Repository root = parent directory of this scripts/ folder."""
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _parse_dotenv(path):
+    """Parse a simple KEY=VALUE .env file. Returns a dict ({} if unreadable)."""
+    values = {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key = key.strip()
+                if key.startswith("export "):
+                    key = key[len("export "):].strip()
+                value = value.strip()
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                    value = value[1:-1]
+                if key:
+                    values[key] = value
+    except OSError:
+        pass
+    return values
+
+
+def _load_dotenv():
+    """Load the repo-root .env into os.environ, never overriding real env vars.
+
+    This is the one supported place for the operator's secrets on a local
+    machine: the executing agent writes the credentials the operator hands
+    over into `<repo>/.env` (git-ignored, never committed, never printed),
+    and every script picks them up from there. A variable already set in
+    the real environment always wins over the file.
+    """
+    path = os.path.join(repo_root(), ".env")
+    for key, value in _parse_dotenv(path).items():
+        os.environ.setdefault(key, value)
+
+
+_load_dotenv()
 
 
 def config_path():
