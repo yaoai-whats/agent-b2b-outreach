@@ -30,6 +30,14 @@ Climb only as high as the company's value justifies. Stop at the first rung that
    - Pattern not established: use the finder endpoint (name plus domain), which infers and verifies together.
    - Budget rule (see config): reserve paid checks for your top tiers. Record a "no result" outcome per company and do not pay to re-check the same company inside the cooldown window set in config.
 
+## Domain Search: a people-and-address source before the finder
+
+Hunter's Domain Search endpoint (`python3 scripts/hunter_pool.py domain-search <domain>`) returns, in one call, the people and addresses Hunter associates with a domain: names, positions, and email addresses with a confidence score. Its place in this system is upstream of the finder, not a rung of the ladder:
+
+- Use it during enrichment when the website path has not produced a decision-maker, or has produced too few published addresses to establish a pattern. Its returns feed pattern establishment (rung 3) and give the finder (rung 4) fewer blind calls to make.
+- Per Hunter's billing rules, a Domain Search call is charged when it returns results. Cache the result per domain, do not repeat the call for the same domain inside the cooldown window set in config, and reserve it for the tiers allowed paid spend in config.
+- A Domain Search return is evidence of where an address was seen, not proof that the mailbox exists. Each returned address still needs rung 1 or rung 4 before it can be labelled sendable.
+
 ## The five labels
 
 | Label | Meaning | Send? |

@@ -22,6 +22,11 @@ CLI:
     python3 hunter_pool.py account
     python3 hunter_pool.py verifier <email>
     python3 hunter_pool.py finder <first_name> <last_name> <domain>
+    python3 hunter_pool.py domain-search <domain>
+
+The domain-search command trims Hunter's response to the fields the
+enrichment stage uses (address, type, name, position, confidence,
+department) instead of printing the raw payload.
 """
 import json
 import os
@@ -86,6 +91,20 @@ def call(path, params):
     raise RuntimeError("all Hunter keys exhausted")
 
 
+_DOMAIN_SEARCH_FIELDS = ("value", "type", "first_name", "last_name",
+                         "position", "confidence", "department")
+
+
+def _trim_domain_search(data):
+    """Keep only the useful fields of a Domain Search response."""
+    emails = [{field: item.get(field) for field in _DOMAIN_SEARCH_FIELDS}
+              for item in data.get("emails") or []
+              if isinstance(item, dict)]
+    return {"domain": data.get("domain"),
+            "organization": data.get("organization"),
+            "emails": emails}
+
+
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "account"
     if cmd == "account":
@@ -100,7 +119,14 @@ if __name__ == "__main__":
                                    "last_name": sys.argv[3],
                                    "domain": sys.argv[4]}).get("data", {}),
             ensure_ascii=False))
+    elif cmd == "domain-search" and len(sys.argv) == 3:
+        print(json.dumps(
+            _trim_domain_search(
+                call("/domain-search",
+                     {"domain": sys.argv[2]}).get("data", {})),
+            ensure_ascii=False))
     else:
         print(json.dumps({"error": "usage: account | verifier <email> | "
-                                   "finder <first> <last> <domain>"}))
+                                   "finder <first> <last> <domain> | "
+                                   "domain-search <domain>"}))
         sys.exit(2)

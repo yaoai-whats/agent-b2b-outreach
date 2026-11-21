@@ -74,6 +74,15 @@ python3 scripts/doctor.py
 # 5. 查 Hunter 轮换池余额
 python3 scripts/hunter_pool.py account
 
+# 5b. 按域名查人查邮箱（Hunter Domain Search：返回该域名下的人员与邮箱，
+#     按 Hunter 计费规则、有结果才计费；只对 config 允许付费的档位使用）
+python3 scripts/hunter_pool.py domain-search example.com
+
+# 5c. 邮箱格式确立与候选生成（纯本地计算，不花额度：已知姓名-邮箱对
+#     以 JSON 数组 [{"first": "...", "last": "...", "email": "..."}] 喂入 detect）
+python3 scripts/email_pattern.py detect --pairs pairs.json
+python3 scripts/email_pattern.py candidate --first Jane --last Doe --pattern first.last --domain example.com
+
 # 6. 加入客户（手动或用扫客提示词），生成排序总表
 python3 scripts/render.py --input data/leads.example.jsonl --output /tmp/ranked.md
 
@@ -136,7 +145,7 @@ python3 scripts/build_tracker.py --help
 │   └── leads.example.jsonl    3 家虚构示例公司
 ├── docs/                      方法、评分、验证、信件、跟进、防线六篇
 ├── prompts/                   第 0 步问询 + 五个阶段各一份平台无关的提示词
-├── scripts/                   配置加载、自检、搜索层、域名检查、Hunter 轮换、质检门、信件生成、发送、收件箱、去重、总表、跟进表
+├── scripts/                   配置加载、自检、搜索层、域名检查、Hunter 轮换、邮箱格式推断、质检门、信件生成、发送、收件箱、去重、总表、跟进表
 ├── tests/                     标准库 unittest 回归测试（python3 -m unittest discover -s tests）
 └── templates/
     └── letter-templates.md    开发信填空模板（标准版 + 渠道伙伴版）
