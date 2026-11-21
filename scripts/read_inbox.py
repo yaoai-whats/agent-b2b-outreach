@@ -28,6 +28,22 @@ flagged) and the most recent N messages are fetched (--limit, default
                subject "unsubscribe", empty body.
 - reply:       everything else.
 
+Bounce entries are attributed to the address that actually failed,
+never to the daemon that reported it: the per-recipient blocks of the
+message/delivery-status part name the failed recipient in
+Final-Recipient (Original-Recipient as fallback), and that address —
+matched against the lead rows like any sender — becomes the entry's
+email, so scripts/send_mail.py later refuses that exact address as
+previously bounced and the breaker math sees the right company. One
+entry is written per failed recipient. A recipient block whose
+Action is "delayed" is recorded with type "delayed" instead of
+"bounce": a delay is a soft failure, and recording it as a bounce
+would refuse a live address forever and feed the circuit breaker.
+Success receipts (delivered / relayed / expanded) are not recorded.
+When no recipient can be parsed out of a bounce, the entry falls back
+to the sender address with an empty company, and Stage 4's human
+matching (prompts/04-inbox.md) takes it from there.
+
 Classified entries are appended to data/outreach-feedback.json in that
 file's existing shape ({"entries": [{"company", "date", "email",
 "type", "summary"}]}, the shape scripts/build_tracker.py reads).
@@ -52,6 +68,7 @@ import email.policy
 import imaplib
 import json
 import os
+import re
 import sys
 from datetime import datetime
 
@@ -139,6 +156,112 @@ def classify(from_addr, subject, body, is_dsn=False):
     return "reply"
 
 
+def _recipient_address(raw):
+    """Bare address out of a DSN recipient header value.
+
+    Values look like "rfc822; buyer@example.com" (sometimes with the
+    address in angle brackets). Returns "" when no address is present.
+    """
+    value = (raw or "").strip()
+    if ";" in value:
+        value = value.rsplit(";", 1)[-1].strip()
+    value = value.strip("<>").strip().lower()
+    return value if "@" in value else ""
+
+
+def parse_dsn_recipients(msg):
+    """Recipients named by a delivery status notification.
+
+    Returns a list of {"email", "action", "status"} dicts taken from
+    the per-recipient blocks of any message/delivery-status part
+    (Final-Recipient preferred, Original-Recipient as fallback). When
+    no structured block parses, the plain-text body is scanned for
+    Final-Recipient / Original-Recipient lines, the shape many MTAs
+    use in the human-readable part; those carry no Action, so they
+    come back with an empty action and are treated as failures by the
+    caller. Returns [] when the message names nobody.
+    """
+    found = []
+    seen = set()
+
+    def _add(addr, action, status):
+        if addr and addr not in seen:
+            seen.add(addr)
+            found.append({"email": addr, "action": action,
+                          "status": status})
+
+    try:
+        for part in msg.walk():
+            if part.get_content_type() != "message/delivery-status":
+                continue
+            payload = part.get_payload()
+            if not isinstance(payload, list):
+                continue
+            # The first block is per-message; the rest are per-recipient.
+            for block in payload[1:]:
+                addr = _recipient_address(block.get("Final-Recipient", "")) \
+                    or _recipient_address(
+                        block.get("Original-Recipient", ""))
+                _add(addr,
+                     (block.get("Action", "") or "").strip().lower(),
+                     (block.get("Status", "") or "").strip())
+    except Exception:  # noqa: BLE001 - a malformed DSN names nobody
+        pass
+    if not found:
+        for match in re.finditer(
+                r"(?:Final|Original)-Recipient:\s*rfc822;\s*"
+                r"<?([^\s<>;]+@[^\s<>;]+)>?",
+                _body_text(msg), re.IGNORECASE):
+            _add(match.group(1).lower(), "", "")
+    return found
+
+
+def feedback_entries_for(msg, email_to_company):
+    """Feedback-log entries for one fetched message (usually one).
+
+    Non-bounces produce a single entry keyed by the sender, exactly
+    as before. A bounce produces one entry per failed recipient named
+    in its DSN, keyed by that recipient (see parse_dsn_recipients):
+    the daemon's From address is not the customer, and recording it
+    would leave the real address unrefused and the company unmatched.
+    Delayed recipients are recorded as type "delayed"; success
+    receipts are not recorded at all. A bounce whose DSN names nobody
+    falls back to a single entry keyed by the sender.
+    """
+    from_addr = email.utils.parseaddr(
+        _decode(msg.get("From", "")))[1].lower()
+    subject = _decode(msg.get("Subject", ""))
+    body = _body_text(msg)
+    kind = classify(from_addr, subject, body, is_dsn=_is_dsn(msg))
+    date_str = ""
+    if msg.get("Date"):
+        try:
+            date_str = email.utils.parsedate_to_datetime(
+                msg["Date"]).strftime("%Y-%m-%d")
+        except (TypeError, ValueError):
+            date_str = ""
+    if not date_str:
+        date_str = datetime.now().strftime("%Y-%m-%d")
+    base = {"date": date_str, "summary": subject[:200]}
+    if kind != "bounce":
+        return [dict(base, company=email_to_company.get(from_addr, ""),
+                     email=from_addr, type=kind)]
+    recipients = parse_dsn_recipients(msg)
+    entries = []
+    for recip in recipients:
+        if recip["action"] in ("delivered", "relayed", "expanded"):
+            continue
+        entries.append(dict(
+            base,
+            company=email_to_company.get(recip["email"], ""),
+            email=recip["email"],
+            type="delayed" if recip["action"] == "delayed" else "bounce"))
+    if entries or recipients:
+        return entries
+    return [dict(base, company=email_to_company.get(from_addr, ""),
+                 email=from_addr, type="bounce")]
+
+
 def default_blocklist_path():
     """The operator's blocklist: config/blocklist.json in the repo."""
     return os.path.join(_config.repo_root(), "config", "blocklist.json")
@@ -163,8 +286,17 @@ def add_to_blocklist(path, email_addr, company, date_str):
     if os.path.exists(path):
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
-        if not isinstance(data, dict):
-            data = {"entries": []}
+        if not isinstance(data, dict) \
+                or not isinstance(data.get("entries", []), list):
+            # Never "repair" a wrong-shaped blocklist by starting
+            # from empty: the write below would silently erase every
+            # existing entry. Refuse; the caller warns, and the
+            # feedback log still records the unsubscribe, so the
+            # sending side refuses the address from there.
+            raise ValueError(
+                f"blocklist file {path} has the wrong shape (expected "
+                "a JSON object with an \"entries\" list); refusing to "
+                "overwrite it")
     entries = data.setdefault("entries", [])
     for entry in entries:
         if (entry.get("email") or "").strip().lower() == addr:
@@ -229,8 +361,21 @@ def main():
                         row.get("company", "")
 
     if os.path.exists(feedback_path):
-        with open(feedback_path, encoding="utf-8") as fh:
-            feedback = json.load(fh)
+        try:
+            with open(feedback_path, encoding="utf-8") as fh:
+                feedback = json.load(fh)
+        except (OSError, ValueError) as exc:
+            print(f"REFUSED: feedback file {feedback_path} exists but "
+                  f"could not be read as JSON ({exc}); fix or restore "
+                  "it rather than starting from an empty history — "
+                  "the log is safety data (unsubscribes, bounces)")
+            return 1
+        if not isinstance(feedback, dict):
+            print(f"REFUSED: feedback file {feedback_path} has the "
+                  "wrong shape (expected a JSON object); fix or "
+                  "restore it rather than starting from an empty "
+                  "history")
+            return 1
     else:
         feedback = {"entries": []}
     seen = {(e.get("email", ""), e.get("summary", ""), e.get("date", ""))
@@ -249,26 +394,7 @@ def main():
                 continue
             msg = email.message_from_bytes(msg_data[0][1],
                                            policy=email.policy.default)
-            from_addr = email.utils.parseaddr(
-                _decode(msg.get("From", "")))[1].lower()
-            subject = _decode(msg.get("Subject", ""))
-            body = _body_text(msg)
-            kind = classify(from_addr, subject, body, is_dsn=_is_dsn(msg))
-            date_str = ""
-            if msg.get("Date"):
-                try:
-                    date_str = email.utils.parsedate_to_datetime(
-                        msg["Date"]).strftime("%Y-%m-%d")
-                except (TypeError, ValueError):
-                    date_str = ""
-            if not date_str:
-                date_str = datetime.now().strftime("%Y-%m-%d")
-            fetched.append({
-                "company": email_to_company.get(from_addr, ""),
-                "date": date_str,
-                "email": from_addr,
-                "type": kind,
-                "summary": subject[:200]})
+            fetched.extend(feedback_entries_for(msg, email_to_company))
         imap.logout()
     except (imaplib.IMAP4.error, OSError) as exc:
         print(f"IMAP ERROR: {exc}")

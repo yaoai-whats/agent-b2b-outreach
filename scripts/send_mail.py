@@ -21,7 +21,22 @@ address than the one the config advertises.
 Modes:
 - Default is a dry run: every check runs, the letters that would be
   sent are printed, nothing leaves the machine.
-- Add --send to actually send.
+- Add --send to actually send. A real send run takes an exclusive
+  lock (data/send.lock) for its whole duration, so two overlapping
+  --send runs cannot both pass the checks against the same state and
+  double-send; a second run is refused with the lock named. Delete
+  the lock file by hand only when no send run is actually alive.
+- Follow-ups never go through the cold path above (check 2 refuses
+  anyone already contacted). They use --followup with --lead/--line
+  (and usually --letter-file carrying the new-content draft), which
+  re-validates eligibility at send time against the CURRENT records:
+  no reply, unsubscribe, or bounce for the company or address in the
+  feedback log; not blocklisted; a prior touch exists; follow-ups
+  already sent below followup_max (config); the last touch at least
+  followup_interval_days ago (config). A passed follow-up is recorded
+  in the send-state "followups" list, the shape build_tracker.py
+  reads, and counts toward the same daily cap and breaker window as
+  first touches.
 
 Input:
 - Single letter (default): --lead <leads.jsonl> --line N builds the
@@ -50,13 +65,15 @@ says why; there is no override flag):
 2. Exclusions: the recipient must not be excluded. Excluded means the
    address or its domain appears in config/blocklist.json; a cold
    email was already sent to this address or to this company (the
-   send-state sent/followups records — this script is the cold path,
-   follow-ups go through the tracker flow, never through here); or
+   send-state sent/followups records — this cold path never re-sends
+   to anyone already contacted; follow-ups use --followup below,
+   which requires that prior record instead); or
    the feedback log records an unsubscribe or a bounce for this
    address.
 3. Quality gate: the letter must pass scripts/quality_gate.py.
-4. Daily cap: sends recorded in data/send-state.json for today (plus
-   this run's sends) must be below daily_send_cap (see config).
+4. Daily cap: sends recorded in data/send-state.json for today —
+   first touches and follow-ups alike (plus this run's sends) — must
+   be below daily_send_cap (see config).
 5. Bounce circuit breaker: when data/outreach-feedback.json exists,
    refuse when today's bounces reach bounce_breaker_daily, or when the
    bounce rate among the most recent bounce_breaker_window sends
@@ -90,9 +107,23 @@ def _today():
 
 
 def _load_json(path, default):
+    """Load a JSON state file, failing closed.
+
+    A missing file returns `default`. A file that exists but cannot be
+    read as JSON raises ValueError: send-state, feedback, and the
+    blocklist are safety data, and treating a corrupt file as empty
+    history would silently disarm the cap, the breaker, and the
+    exclusion checks. main() turns the ValueError into a refusal.
+    """
     if path and os.path.exists(path):
-        with open(path, encoding="utf-8") as fh:
-            return json.load(fh)
+        try:
+            with open(path, encoding="utf-8") as fh:
+                return json.load(fh)
+        except (OSError, ValueError) as exc:
+            raise ValueError(
+                f"{path} exists but could not be read as JSON ({exc}); "
+                "refusing to treat safety data as empty — fix or "
+                "restore the file, or remove it to start fresh") from exc
     return default
 
 
@@ -126,13 +157,21 @@ def default_blocklist_path():
 
 
 def load_blocklist(path):
-    """Blocklist entries; a missing or malformed file means no entries."""
+    """Blocklist entries; a missing file means no entries.
+
+    A file that exists but is malformed — unparseable, or valid JSON
+    of the wrong shape — raises ValueError instead of silently meaning
+    "nobody is blocklisted": the blocklist is a safety list, and
+    reading it as empty would re-enable barred recipients.
+    """
     data = _load_json(path, {"entries": []})
-    if isinstance(data, dict):
-        entries = data.get("entries", [])
-        if isinstance(entries, list):
-            return entries
-    return []
+    if not isinstance(data, dict) \
+            or not isinstance(data.get("entries", []), list):
+        raise ValueError(
+            f"blocklist file {path} has the wrong shape (expected a "
+            "JSON object with an \"entries\" list); refusing to treat "
+            "it as an empty blocklist")
+    return data.get("entries", [])
 
 
 def recipient_of(lead):
@@ -158,7 +197,7 @@ def check_breaker(feedback_path, state):
         return (f"bounce circuit breaker: {today_bounces} bounces today "
                 f"(limit {daily_limit}); sending is stopped until a human "
                 "investigates")
-    sent = state.get("sent", [])
+    sent = state.get("sent", []) + state.get("followups", [])
     if sent:
         recent = sent[-window:]
         recent_companies = {e.get("company") for e in recent}
@@ -262,6 +301,13 @@ class Sender:
 
     def __init__(self, state, state_path, log_path, feedback_path, send,
                  blocklist_path=None):
+        if not isinstance(state, dict) \
+                or not isinstance(state.get("sent", []), list) \
+                or not isinstance(state.get("followups", []), list):
+            raise ValueError(
+                "send-state has the wrong shape (expected a JSON "
+                "object with \"sent\" and \"followups\" lists); "
+                "refusing to send against unknown history")
         self.state = state
         self.state_path = state_path
         self.log_path = log_path
@@ -271,17 +317,16 @@ class Sender:
         self.blocklist_path = blocklist_path or default_blocklist_path()
         self.blocklist_entries = load_blocklist(self.blocklist_path)
         feedback = _load_json(feedback_path, {"entries": []})
-        self.feedback_entries = (feedback.get("entries", [])
-                                 if isinstance(feedback, dict) else [])
+        if not isinstance(feedback, dict) \
+                or not isinstance(feedback.get("entries", []), list):
+            raise ValueError(
+                f"feedback file {feedback_path} has the wrong shape "
+                "(expected a JSON object with an \"entries\" list); "
+                "refusing to treat feedback history as empty")
+        self.feedback_entries = feedback.get("entries", [])
 
-    def exclusion_reason(self, to_addr, company):
-        """Why this recipient is excluded, or None when they are clear.
-
-        The three sources, in order: config/blocklist.json (address or
-        domain), the send-state records (this cold path never re-sends
-        to an address or company it already contacted), and the
-        feedback log (unsubscribe or bounce for this address).
-        """
+    def blocklist_reason(self, to_addr):
+        """The blocklist refusal for this address, or None."""
         addr = (to_addr or "").strip().lower()
         domain = addr.rsplit("@", 1)[-1] if "@" in addr else ""
         for entry in self.blocklist_entries:
@@ -297,6 +342,20 @@ class Sender:
                         f"config/blocklist.json (reason: "
                         f"{entry.get('reason', 'unspecified')}, added "
                         f"{entry.get('added_at', 'unknown date')})")
+        return None
+
+    def exclusion_reason(self, to_addr, company):
+        """Why this recipient is excluded, or None when they are clear.
+
+        The three sources, in order: config/blocklist.json (address or
+        domain), the send-state records (this cold path never re-sends
+        to an address or company it already contacted), and the
+        feedback log (unsubscribe or bounce for this address).
+        """
+        addr = (to_addr or "").strip().lower()
+        blocked = self.blocklist_reason(addr)
+        if blocked:
+            return blocked
         records = (self.state.get("sent", [])
                    + self.state.get("followups", []))
         for record in records:
@@ -305,7 +364,7 @@ class Sender:
             if addr and sent_to == addr:
                 return (f"already contacted: a cold email was already "
                         f"sent to {addr} on {when}; follow-ups go "
-                        "through the tracker flow, not this script")
+                        "through --followup mode, not the cold path")
             if company and record.get("company") == company:
                 return (f"already contacted: {company} already has a "
                         f"send record on {when} (to {sent_to or '?'})")
@@ -320,6 +379,22 @@ class Sender:
                 return (f"previously bounced: mail to {addr} bounced "
                         f"on {entry.get('date', 'unknown date')}")
         return None
+
+    def _sent_today_count(self):
+        """Sends recorded for today, first touches and follow-ups.
+
+        Follow-ups share the daily cap with first touches (see
+        docs/05-followup-policy.md), so both state lists count.
+        `extra_today` adds this run's dry-run approvals, which are not
+        written to the state file; real sends are appended to the
+        state lists as they happen and must NOT also be added through
+        extra_today, or every real send would consume the cap twice.
+        """
+        total = self.extra_today
+        for key in ("sent", "followups"):
+            total += sum(1 for e in self.state.get(key, [])
+                         if str(e.get("sent_at", "")).startswith(_today()))
+        return total
 
     def _log(self, company, to_addr, subject, outcome, reason=""):
         _append_jsonl(self.log_path, {
@@ -359,9 +434,7 @@ class Sender:
 
         # Check 4: daily cap (recorded sends + this run's sends).
         cap = _config.get("daily_send_cap", 30)
-        sent_today = sum(1 for e in self.state.get("sent", [])
-                         if str(e.get("sent_at", "")).startswith(_today()))
-        sent_today += self.extra_today
+        sent_today = self._sent_today_count()
         if sent_today >= cap:
             reason = f"daily send cap reached ({sent_today}/{cap} today)"
             self._log(company, to_addr, subject, "refused", reason)
@@ -399,9 +472,196 @@ class Sender:
             "subject": subject})
         with open(self.state_path, "w", encoding="utf-8") as fh:
             json.dump(self.state, fh, ensure_ascii=False, indent=2)
-        self.extra_today += 1
+        # No extra_today increment here: the record just appended to
+        # state["sent"] is already counted by _sent_today_count() on
+        # the next attempt. Counting it in both places made every real
+        # send consume the daily cap twice.
         self._log(company, to_addr, subject, "sent")
         return "sent", "", False
+
+    # ---------------------------------------------------------- follow-ups
+
+    def followup_refusal(self, lead, to_addr):
+        """Why a follow-up to this lead must not be sent, or None.
+
+        Eligibility is re-validated at send time against the CURRENT
+        records, never trusted from whenever the follow-up was
+        selected or drafted: the feedback log may have gained a reply,
+        an unsubscribe, or a bounce since, and the interval and the
+        follow-up maximum are recomputed from the send-state records
+        and the lead row (whichever records more touches wins, so a
+        partially written-back history can only make this stricter).
+        """
+        company = lead.get("company", "")
+        addr = (to_addr or "").strip().lower()
+
+        blocked = self.blocklist_reason(addr)
+        if blocked:
+            return blocked
+
+        for entry in self.feedback_entries:
+            same_company = company and entry.get("company") == company
+            same_addr = addr and \
+                (entry.get("email") or "").strip().lower() == addr
+            if not (same_company or same_addr):
+                continue
+            kind = entry.get("type")
+            if kind == "reply":
+                return (f"already replied: {company or addr} replied "
+                        f"on {entry.get('date', 'unknown date')}; the "
+                        "follow-up sequence is over and a human owns "
+                        "the conversation now")
+            if kind == "unsubscribe":
+                when = entry.get('date', 'unknown date')
+                return (f"unsubscribed: {company or addr} asked to "
+                        f"unsubscribe on {when}; never contact them "
+                        "again")
+            if kind == "bounce":
+                return (f"previously bounced: mail for "
+                        f"{company or addr} bounced on "
+                        f"{entry.get('date', 'unknown date')}")
+
+        sent_records = [r for r in self.state.get("sent", [])
+                        if r.get("company") == company]
+        fu_records = [r for r in self.state.get("followups", [])
+                      if r.get("company") == company]
+        if not sent_records and not (lead.get("last_touch_at") or ""):
+            return (f"no prior contact: {company} has no first-touch "
+                    "record in the send state; a follow-up cannot be "
+                    "the first letter a company receives")
+
+        max_fu = int(_config.get("followup_max", 2))
+        fu_count = max(len(fu_records),
+                       int(lead.get("followups_sent") or 0))
+        if fu_count >= max_fu:
+            return (f"follow-up maximum reached: {company} already "
+                    f"received {fu_count} follow-up(s), maximum is "
+                    f"{max_fu}; the sequence is complete")
+
+        interval = int(_config.get("followup_interval_days", 30))
+        touches = [str(r.get("sent_at", ""))[:10]
+                   for r in sent_records + fu_records]
+        if lead.get("last_touch_at"):
+            touches.append(str(lead["last_touch_at"])[:10])
+        touches = [t for t in touches if t]
+        if touches:
+            last = max(touches)
+            try:
+                days = (datetime.now()
+                        - datetime.strptime(last, "%Y-%m-%d")).days
+            except ValueError:
+                days = None
+            if days is not None and days < interval:
+                return (f"follow-up interval not met: last touch to "
+                        f"{company} was {days} day(s) ago ({last}), "
+                        f"interval is {interval} days")
+        return None
+
+    def attempt_followup(self, to_addr, subject, body, lead, gate_name):
+        """Process one follow-up letter with send-time re-validation.
+
+        Same outcome vocabulary as attempt(). The checks, in order:
+        recipient status, follow-up eligibility (followup_refusal),
+        quality gate, daily cap (shared with first touches), bounce
+        circuit breaker. A real send is recorded in the send-state
+        "followups" list.
+        """
+        company = lead.get("company", "")
+        status = lead.get("email_status")
+        if status not in SENDABLE_STATUSES:
+            reason = (f"recipient status is {status!r}; only "
+                      "hunter_valid or public_confirmed addresses may "
+                      "be sent to")
+            self._log(company, to_addr, subject, "refused", reason)
+            return "refused", reason, False
+
+        refusal = self.followup_refusal(lead, to_addr)
+        if refusal:
+            self._log(company, to_addr, subject, "refused", refusal)
+            return "refused", refusal, False
+
+        import quality_gate
+        failures = quality_gate.check_email(gate_name, subject, body)
+        if failures:
+            reason = "quality gate failed: " + "; ".join(failures)
+            self._log(company, to_addr, subject, "refused", reason)
+            return "refused", reason, False
+
+        cap = _config.get("daily_send_cap", 30)
+        sent_today = self._sent_today_count()
+        if sent_today >= cap:
+            reason = f"daily send cap reached ({sent_today}/{cap} today)"
+            self._log(company, to_addr, subject, "refused", reason)
+            return "refused", reason, True
+
+        breaker = check_breaker(self.feedback_path, self.state)
+        if breaker:
+            self._log(company, to_addr, subject, "refused", breaker)
+            return "refused", breaker, True
+
+        if not self.send:
+            self.extra_today += 1
+            self._log(company, to_addr, subject, "would_send")
+            return "would_send", "", False
+
+        user = os.environ.get("SMTP_USER", "")
+        sender = resolve_sender(user)
+        host = os.environ.get("SMTP_HOST", "")
+        password = os.environ.get("SMTP_PASS", "")
+        if not (host and user and password and sender):
+            reason = ("missing SMTP credentials in the environment "
+                      "(SMTP_HOST, SMTP_USER, SMTP_PASS, and a From "
+                      "address via SMTP_FROM, config sender_email, or "
+                      "SMTP_USER)")
+            self._log(company, to_addr, subject, "refused", reason)
+            return "refused", reason, False
+        ok, error = _deliver(sender, to_addr, subject, body)
+        if not ok:
+            self._log(company, to_addr, subject, "error", error)
+            return "error", error, False
+        self.state.setdefault("followups", []).append({
+            "company": company, "to": to_addr,
+            "sent_at": datetime.now().isoformat(timespec="seconds"),
+            "subject": subject})
+        with open(self.state_path, "w", encoding="utf-8") as fh:
+            json.dump(self.state, fh, ensure_ascii=False, indent=2)
+        self._log(company, to_addr, subject, "sent")
+        return "sent", "", False
+
+
+def acquire_send_lock(path):
+    """Take the exclusive send lock; return a file descriptor or None.
+
+    The lock file is created with O_EXCL so check-and-create is
+    atomic: exactly one --send run holds it. It records the holder's
+    pid and start time so an operator can tell a live holder from a
+    stale file left by a crashed run. The holder must pass the fd to
+    release_send_lock().
+    """
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except OSError:
+        return None
+    try:
+        os.write(fd, json.dumps({
+            "pid": os.getpid(),
+            "started_at": datetime.now().isoformat(timespec="seconds"),
+        }).encode("utf-8"))
+    except OSError:
+        pass
+    return fd
+
+
+def release_send_lock(fd, path):
+    """Release the send lock taken by acquire_send_lock."""
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
 
 
 def _missing_creds_note():
@@ -432,6 +692,14 @@ def main():
     parser.add_argument("--batch", action="store_true",
                         help="Process every sendable row in --lead "
                              "instead of a single row.")
+    parser.add_argument("--followup", action="store_true",
+                        help="Send a follow-up for the --lead/--line "
+                             "row instead of a first touch: eligibility "
+                             "(no reply/unsubscribe/bounce, follow-up "
+                             "maximum, interval) is re-validated at "
+                             "send time. The letter comes from "
+                             "--letter-file when given, else is built "
+                             "from the row.")
     parser.add_argument("--interval", type=float, default=60,
                         help="Seconds between batch letters, plus a "
                              "random 0-30s jitter (default 60).")
@@ -439,11 +707,74 @@ def main():
                         help="Actually send. Without this flag: dry run.")
     args = parser.parse_args()
 
+    lock_fd = None
+    lock_path = _config.data_path("send.lock")
+    if args.send:
+        lock_fd = acquire_send_lock(lock_path)
+        if lock_fd is None:
+            print("REFUSED: another --send run is already in "
+                  f"progress (lock file {lock_path}); overlapping "
+                  "send runs are refused so two runs cannot pass the "
+                  "checks against the same state and double-send. If "
+                  "no send run is actually alive, delete the lock "
+                  "file and retry.")
+            return 2
+    try:
+        return _run(args, parser)
+    except ValueError as exc:
+        # Safety data (send-state, feedback, blocklist) exists but is
+        # corrupt or the wrong shape: fail closed with a clear refusal
+        # instead of a traceback or, worse, empty history.
+        print(f"REFUSED: {exc}")
+        return 2
+    finally:
+        if lock_fd is not None:
+            release_send_lock(lock_fd, lock_path)
+
+
+def _run(args, parser):
     state_path = _config.data_path("send-state.json")
     log_path = _config.data_path("send-log.jsonl")
     feedback_path = _config.data_path("outreach-feedback.json")
     state = _load_json(state_path, {"sent": []})
     sender = Sender(state, state_path, log_path, feedback_path, args.send)
+
+    if args.followup:
+        if not args.lead:
+            parser.error("--followup requires --lead <leads.jsonl>")
+        with open(args.lead, encoding="utf-8") as fh:
+            rows = [json.loads(line) for line in fh if line.strip()]
+        lead = rows[args.line - 1]
+        company = lead.get("company", "")
+        if args.letter_file:
+            to_addr, subject, body = parse_letter_file(args.letter_file)
+        else:
+            try:
+                to_addr, subject, body = build_letter_for_lead(lead)
+            except ValueError as exc:
+                print(f"REFUSED: {exc}")
+                return 2
+        import letter_builder
+        gate_name = letter_builder.extract_name(lead.get("contact", ""))
+        outcome, reason, _stop = sender.attempt_followup(
+            to_addr, subject, body, lead, gate_name)
+        if outcome == "would_send":
+            _missing_creds_note()
+            print("DRY RUN (nothing sent). Would send follow-up:")
+            print(f"From: {resolve_sender(os.environ.get('SMTP_USER', ''))}")
+            print(f"To: {to_addr}")
+            print(f"Subject: {subject}")
+            print()
+            print(body)
+            return 0
+        if outcome == "sent":
+            print(f"SENT FOLLOW-UP: {to_addr} ({company})")
+            return 0
+        if outcome == "error":
+            print(f"SEND ERROR: {reason}")
+            return 1
+        print(f"REFUSED: {reason}")
+        return 1
 
     if args.batch:
         if not args.lead:
