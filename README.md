@@ -22,7 +22,7 @@
 
 - **必备一**：一个专门发开发信的邮箱（不要用主业务邮箱），以及它的 SMTP / IMAP 服务器地址和授权码（在哪一步问、怎么引导用户去邮箱设置里找，见 `prompts/00-onboarding.md` 第 10 问）。
 - **必备二**：一个 Hunter 账号的 API Key（免费版每月 50 个额度，起步够用）。
-- **强烈推荐（不是必备）**：一个搜索 API Key（Serper / Tavily / Brave 任一，都有免费额度）。没有它系统也能跑，但找公司和验邮箱会降级；你要主动告诉用户去哪免费申请，他暂时拿不到就按 `AGENTS.md` 的降级规则继续，不许因此卡死第一轮。
+- **强烈推荐（不是必备）**：一个搜索 API Key（Serper / Keenable / Tavily / Exa / Linkup / Brave 任一，都有免费额度，只需注册不绑卡）。没有它系统也能跑（搜索层会先走 Keenable 免 Key 公共端点），但找公司和验邮箱会降级；你要主动告诉用户去哪免费申请，他暂时拿不到就按 `AGENTS.md` 的降级规则继续，不许因此卡死第一轮。
 
 ## 这套系统解决什么问题
 
@@ -64,7 +64,7 @@ cp config/blocklist.example.json config/blocklist.json
 # 3. API 密钥只放环境变量，或写进仓库根目录的 .env 文件（脚本会自动读取，
 #    .env 已被 git 忽略）；绝不写进 config，绝不提交进仓库
 export HUNTER_API_KEYS="key-one,key-two"     # Hunter 邮箱查找/验证（可选，三方轮换）
-export SERPER_API_KEY="your-key"             # 搜索层，三选一即可（Serper 优先）
+export SERPER_API_KEY="your-key"             # 搜索层，六选一即可（Serper 优先；或 KEENABLE_API_KEY / TAVILY_API_KEY / EXA_API_KEY / LINKUP_API_KEY / BRAVE_API_KEY）
 
 # 4. 跑一遍自检：Python 版本、配置是否还是示例值、环境变量齐不齐、
 #    DNS 能不能查 MX、SMTP 服务器通不通、发件人地址有没有冲突，
@@ -112,7 +112,7 @@ python3 scripts/build_tracker.py --help
 
 发送有两种模式：单封（`--lead ... --line N`）与批量（`--batch --lead data/leads.jsonl`）。批量模式会把客户库里状态合格的行逐封处理：自动组信、过质检、五道校验照旧（收件人状态、排除检查、质检门、每日上限、退信熔断），封与封之间默认间隔 60 秒加 0–30 秒随机抖动；当日封顶按 `daily_send_cap` 减去今日已发数计算，达顶即停，退信熔断触发同样立即停并说明原因。其中排除检查会先在批量开始前预筛：命中黑名单（`config/blocklist.json`，按邮箱或域名）、已经发过冷邮件的地址或公司、在反馈记录里退订过或退信过的地址，都会逐行打印原因并计入汇总的 excluded 计数，绝不重复发送。两种模式默认都是 dry-run，加 `--send` 才真发。SMTP 连接模式按端口自动选：465 端口（或环境变量 `SMTP_USE_SSL=1`）走 SSL 直连（QQ 邮箱、163、阿里云邮箱的默认模式），其余端口走 STARTTLS，报错信息会注明当前模式方便排障。
 
-脚本按顺序用第一个配置好的搜索 API：`SERPER_API_KEY`（Serper，Google 索引，验邮箱精确匹配最稳）→ `TAVILY_API_KEY` → `BRAVE_API_KEY`，三家都有免费额度，配任意一个即可。一个都没配时脚本会退出并给出 FALLBACK 提示，此时才许用 Agent 自带搜索顶上，但要在运行日志注明“搜索层降级”，验真结果降一档处理。
+脚本按顺序用第一个配置好的搜索 API：`SERPER_API_KEY`（Serper，Google 索引，验邮箱精确匹配最稳）→ `KEENABLE_API_KEY`（Keenable，免费月额度最大）→ `TAVILY_API_KEY` → `EXA_API_KEY` → `LINKUP_API_KEY` → `BRAVE_API_KEY`，六家都有免费额度（只需注册、不绑卡），配任意一个即可。一个都没配时，脚本先走 Keenable 的免 Key 公共端点（按出口 IP 共享限速，每小时 1000 次）顶上，输出里会带 note 标明；这个端点也失败时才退出并给出 FALLBACK 提示，此时才许用 Agent 自带搜索顶上，但要在运行日志注明“搜索层降级”，验真结果降一档处理。语义型搜索（Keenable / Exa / Linkup）的精确匹配命中，须打开页面亲眼看到完整邮箱字符串才算公开确认。
 
 执行 Agent 的最低能力四样：网页搜索、打开读网页、运行 Python、读写文件。缺任何一样，都要在运行日志里明说哪一步降级了。
 

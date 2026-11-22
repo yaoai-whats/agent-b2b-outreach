@@ -105,15 +105,18 @@ def check_env():
     else:
         report("WARN", f"env {hunter_env}",
                "not set; Hunter verification is unavailable")
-    search_keys = [name for name in ("SERPER_API_KEY", "TAVILY_API_KEY",
-                                     "BRAVE_API_KEY")
+    search_keys = [name for name in ("SERPER_API_KEY", "KEENABLE_API_KEY",
+                                     "TAVILY_API_KEY", "EXA_API_KEY",
+                                     "LINKUP_API_KEY", "BRAVE_API_KEY")
                    if os.environ.get(name)]
     if search_keys:
         report("PASS", "search key", f"{search_keys[0]} is set")
     else:
         report("WARN", "search key",
-               "none of SERPER_API_KEY / TAVILY_API_KEY / BRAVE_API_KEY "
-               "is set; the search layer will run in FALLBACK mode")
+               "no search API key is set (SERPER_API_KEY / KEENABLE_API_KEY "
+               "/ TAVILY_API_KEY / EXA_API_KEY / LINKUP_API_KEY / "
+               "BRAVE_API_KEY); the search layer will use Keenable's "
+               "keyless public endpoint, with FALLBACK mode behind it")
 
 
 def check_dns():

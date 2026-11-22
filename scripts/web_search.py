@@ -7,13 +7,25 @@ built-in search the host agent happens to have. Any agent that can run
 Python can call this script and get identical search behaviour.
 
 Providers (first configured key wins, in this order):
-  1. Serper  (Google index)  env SERPER_API_KEY   https://serper.dev
-  2. Tavily                  env TAVILY_API_KEY   https://tavily.com
-  3. Brave Search            env BRAVE_API_KEY    https://brave.com/search/api
+  1. Serper  (Google index)  env SERPER_API_KEY     https://serper.dev
+  2. Keenable                env KEENABLE_API_KEY   https://keenable.ai
+  3. Tavily                  env TAVILY_API_KEY     https://tavily.com
+  4. Exa                     env EXA_API_KEY        https://exa.ai
+  5. Linkup                  env LINKUP_API_KEY     https://www.linkup.so
+  6. Brave Search            env BRAVE_API_KEY      https://brave.com/search/api
 
-If no key is configured the script exits with code 3 and prints a
-FALLBACK notice: the executing agent should use its own built-in web
-search instead and treat result coverage as degraded.
+All six have free tiers (registration only, no card): Serper grants a
+one-off credit pack, Keenable a large monthly free allowance, Tavily a
+monthly credit allowance, Exa a starting credit balance, Linkup a
+monthly credit top-up, Brave a monthly free quota. Quotas change;
+check each provider's site for the current numbers.
+
+If no key is configured at all, the script tries Keenable's keyless
+public endpoint (shared per-IP pool, 1,000 requests/hour) and marks
+the output with a "note" saying so. Only if that also fails does the
+script exit with code 3 and print a FALLBACK notice: the executing
+agent should use its own built-in web search instead and treat result
+coverage as degraded.
 
 Usage:
   python3 web_search.py search "buyer category keyword" [--num 10] [--country de] [--lang de]
@@ -93,11 +105,59 @@ def search_brave(q, num, country, lang, key):
             for x in d.get("web", {}).get("results", [])]
 
 
+def _keenable_results(d):
+    return [{"title": x.get("title", ""), "url": x.get("url", ""),
+             "snippet": (x.get("snippet") or x.get("description") or "")[:400]}
+            for x in d.get("results", [])]
+
+
+def search_keenable(q, num, country, lang, key):
+    payload = {"query": q, "max_results": num}
+    d = _post("https://api.keenable.ai/v1/search", payload, {"X-API-Key": key})
+    return _keenable_results(d)
+
+
+def search_keenable_keyless(q, num):
+    # Keenable's public twin endpoint: no key, rate-limited per egress IP
+    # (1,000 requests/hour, shared with everyone on the same address).
+    payload = {"query": q, "max_results": num}
+    d = _post("https://api.keenable.ai/v1/search/public", payload,
+              {"X-Keenable-Title": "agent-b2b-outreach"})
+    return _keenable_results(d)
+
+
+def search_exa(q, num, country, lang, key):
+    payload = {"query": q, "type": "auto", "numResults": num,
+               "contents": {"highlights": True}}
+    d = _post("https://api.exa.ai/search", payload, {"x-api-key": key})
+    out = []
+    for x in d.get("results", []):
+        snippet = " ".join(x.get("highlights") or []) or (x.get("text") or "")
+        out.append({"title": x.get("title", ""), "url": x.get("url", ""),
+                    "snippet": snippet[:400]})
+    return out
+
+
+def search_linkup(q, num, country, lang, key):
+    payload = {"q": q, "depth": "standard", "outputType": "searchResults",
+               "maxResults": num}
+    d = _post("https://api.linkup.so/v1/search", payload,
+              {"Authorization": f"Bearer {key}"})
+    return [{"title": x.get("name", ""), "url": x.get("url", ""),
+             "snippet": (x.get("content") or "")[:400]}
+            for x in d.get("results", []) if x.get("type", "text") == "text"]
+
+
 PROVIDERS = [
     ("SERPER_API_KEY", "serper", search_serper),
+    ("KEENABLE_API_KEY", "keenable", search_keenable),
     ("TAVILY_API_KEY", "tavily", search_tavily),
+    ("EXA_API_KEY", "exa", search_exa),
+    ("LINKUP_API_KEY", "linkup", search_linkup),
     ("BRAVE_API_KEY", "brave", search_brave),
 ]
+
+SEARCH_KEY_ENVS = " / ".join(env for env, _name, _fn in PROVIDERS)
 
 
 def do_search(query, num, country, lang):
@@ -110,9 +170,21 @@ def do_search(query, num, country, lang):
             except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError) as e:
                 print(json.dumps({"provider": name, "error": str(e)}), file=sys.stderr)
                 continue
-    print("FALLBACK: no search API key configured (SERPER_API_KEY / TAVILY_API_KEY / "
-          "BRAVE_API_KEY). Use the executing agent's built-in web search instead; "
-          "treat coverage as degraded and say so in the run log.", file=sys.stderr)
+    try:
+        results = search_keenable_keyless(query, num)
+        return {"provider": "keenable-keyless", "query": query, "results": results,
+                "note": ("no search API key configured; served by Keenable's "
+                         "keyless public endpoint (shared per-IP pool, 1,000 "
+                         "requests/hour, queries logged by the provider). "
+                         "Register a free key (KEENABLE_API_KEY) for reliable "
+                         "volume, and treat exact-match hits from this tier as "
+                         "unconfirmed until the page itself is opened.")}
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError) as e:
+        print(json.dumps({"provider": "keenable-keyless", "error": str(e)}), file=sys.stderr)
+    print(f"FALLBACK: no search API key configured ({SEARCH_KEY_ENVS}) and the "
+          "keyless endpoint failed. Use the executing agent's built-in web "
+          "search instead; treat coverage as degraded and say so in the run "
+          "log.", file=sys.stderr)
     sys.exit(3)
 
 

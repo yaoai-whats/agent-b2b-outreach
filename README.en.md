@@ -22,7 +22,7 @@ The user only needs to prepare two things, and you should ask for each only when
 
 - **Required 1:** a dedicated sending mailbox (not the main business mailbox) with its SMTP / IMAP server addresses and app password (see question 10 of `prompts/00-onboarding.md` for how to guide the user to find them).
 - **Required 2:** a Hunter account API key (the free tier's 50 monthly credits are enough to start).
-- **Strongly recommended, not required:** one search API key (Serper, Tavily, or Brave — all have free tiers). Without it the system still runs, but company discovery and email verification run degraded; tell the user where to get one for free, and if they cannot, continue under the fallback rules in `AGENTS.md` instead of stalling the first round.
+- **Strongly recommended, not required:** one search API key (Serper, Keenable, Tavily, Exa, Linkup, or Brave — all have free tiers, registration only). Without one the system still runs — the search layer falls back to Keenable's keyless public endpoint — but company discovery and email verification run degraded; tell the user where to get a key for free, and if they cannot, continue under the fallback rules in `AGENTS.md` instead of stalling the first round.
 
 ## What this system does
 
