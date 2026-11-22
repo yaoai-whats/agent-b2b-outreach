@@ -148,7 +148,7 @@ python3 scripts/build_tracker.py --help
 ├── scripts/                   配置加载、自检、搜索层、域名检查、Hunter 轮换、邮箱格式推断、质检门、信件生成、发送、收件箱、去重、总表、跟进表
 ├── tests/                     标准库 unittest 回归测试（python3 -m unittest discover -s tests）
 └── templates/
-    └── letter-templates.md    开发信填空模板（标准版 + 渠道伙伴版）
+    └── letter-templates.md    开发信骨架模板（6 骨架 + 渠道伙伴版）
 ```
 
 ## 安全与合规

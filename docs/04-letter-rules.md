@@ -2,23 +2,25 @@
 
 > Templates live in `templates/letter-templates.md`. Sender identity, product, and value points come from config. Fictional example: Guangzhou BrightTable Ceramics (fictional example), ceramic tableware sets.
 
-## The structure formula
+## The structure formula: six skeletons, not one template
 
-Every first-touch letter has exactly five parts, in this order:
+Every first-touch letter is built from one of six skeletons in `templates/letter-templates.md` (standard introduction, question opening, three-line short, buyer ledger, seasonal scenario, direct supply). The skeletons differ in paragraph order, length band, and call to action, so letters across a batch do not share one structural fingerprint. Within a skeleton, phrase-level spintax varies the wording block by block. The builder narrows the skeleton pool by buyer type, then picks one skeleton per company by a hash of the company domain: the same company always gets the same skeleton, and a batch is spread across the pool, never put on one skeleton.
+
+Every skeleton keeps the same five parts, in an order that differs by skeleton:
 
 1. **Greeting** — "Hi {first_name}," using the cleaned first name (see greeting rules below). No name you can trust: "Hi there,".
-2. **One specific observation** — a single sentence about the recipient's company drawn only from public information: a public product range, a public programme, a public announcement. One observation, not a list.
+2. **One specific observation** — a single sentence about the recipient's company drawn only from public information: a public product range, a public programme, a public announcement. One observation, not a list. A row without a researched observation is not ready: the builder refuses to write the letter, and no generic filler is ever substituted.
 3. **Who you are** — one sentence: sender company plus product (see config).
 4. **One buyer-side value sentence** — what the product does for *their* business (margin, sell-through, low breakage or returns, year-round demand, one line covering several of their channels). Frame benefits from the buyer's side, never as a bare list of product features.
 5. **One low-pressure call to action** — an offer to send a catalogue or a small sample set. One ask only.
 
 Then a plain sign-off: sender name and sender company (see config), one line each. No phone number in the signature unless config explicitly includes one.
 
-**Format limits:** plain text only, no images, no attachments, about 120 words maximum in the body.
+**Format limits:** plain text only, no images, no attachments, at most 130 words in the body (the quality gate enforces this; skeleton length bands sit inside it).
 
 ## Fill-in template
 
-The working template with placeholders (`{first_name}`, `{company}`, `{observation}`, `{product_value}`, `{sender_name}`, `{sender_company}`, and others) is in `templates/letter-templates.md`, together with a channel-partner variant for platforms, buying groups, and distributor networks. `scripts/letter_builder.py` fills the template and rotates subject and phrasing variants by company-domain hash, so the same company always gets the same variant and different companies do not receive byte-identical letters.
+The working skeletons with placeholders (`{first_name}`, `{company}`, `{company_short}`, `{observation}`, `{obs_first}`, `{product}`, `{product_value}`, `{sender_name}`, `{sender_company}`, and others) are in `templates/letter-templates.md`, together with a channel-partner skeleton set for platforms, buying groups, and distributor networks. `scripts/letter_builder.py` fills the skeletons and picks the skeleton and the spintax options by company-domain hash, so the same company always gets the same letter and different companies do not receive structurally identical letters.
 
 ## Hard rules (a violation means rewrite)
 

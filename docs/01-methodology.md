@@ -82,7 +82,7 @@ Manually review 10 to 20 percent of Tier S before outreach: open the website, sk
 
 ## Step 9 — Write and send the first letter
 
-- Formula: greeting with a clean first name + one specific observation drawn only from public information (their public range, a public announcement) + who you are + one buyer-side value sentence + one low-pressure call to action (an offer to send a catalogue). Plain text, at most about 120 words.
+- Formula: greeting with a clean first name + one specific observation drawn only from public information (their public range, a public announcement) + who you are + one buyer-side value sentence + one low-pressure call to action (an offer to send a catalogue). Plain text, at most 130 words. Letters use six skeletons plus phrase-level spintax (see `docs/04-letter-rules.md` and `templates/letter-templates.md`): the skeleton pool narrows by buyer type, one skeleton is picked per company by domain hash so the same company always gets the same skeleton, and a row without a researched observation is refused, never filled with a generic sentence.
 - Hard rules and the quality gate: see `docs/04-letter-rules.md`. Every letter passes `scripts/quality_gate.py` before it can be sent.
 - Choose the letter language by market convention: use the local business language where your sector expects it and you can write it correctly; use English where import trade in that market normally runs in English. Keep the same structure and hard rules in every language.
 - Sending: highest-ranked uncontacted companies first, within the daily cap in config, spread across recipient-local business hours, with the bounce circuit breaker armed (see `docs/06-exclusions-and-failsafes.md`).
