@@ -42,7 +42,7 @@
 | 2 | 补全 | 缺可触达邮箱的候选公司 | 决策人姓名、职位、已验证邮箱、邮箱格式 |
 | 3 | 备批发送 | 已排序、可触达、未发过的公司 | 通过 `scripts/quality_gate.py` 质检的开发信 |
 | 4 | 收件箱 | 你的邮箱（回复、退信、退订） | 更新客户状态、反馈记录、退信熔断检查 |
-| 5 | 跟进 | 已发未回复的公司 | 最多跟进 2 次，间隔 30 天，每次带新内容 |
+| 5 | 跟进 | 已发未回复的公司 | 最多跟进 3 次，间隔 4/7/7 天（第 4、11、18 天），每次换新角度带新内容，第 3 次为收尾信 |
 
 先读 `AGENTS.md`（执行 Agent 的总地图），再读 `docs/01-methodology.md`（十步方法全文），节奏建议见 `schedules.md`。
 
@@ -125,7 +125,7 @@ python3 scripts/build_tracker.py --help
 - **买家**：`buyer_categories`、`decision_maker_titles`、`fit_signals`、`scoring_weights`
 - **排除规则**：`exclusion_rules`（你自己的规则，例如疑似同行、已有客户），另加 `config/blocklist.json`
 - **发件人**：`sender_name`、`sender_company`、`sender_email`、`notification_email`。实际发件地址的优先级是写死的：环境变量 `SMTP_FROM` > config 的 `sender_email` > `SMTP_USER`；前两者都设了且不一致时以 `SMTP_FROM` 为准，`scripts/doctor.py` 会给出警告
-- **发送安全**：`daily_send_cap`（每日上限）、`followup_interval_days`、`followup_max`、退信熔断阈值
+- **发送安全**：`daily_send_cap`（每日上限）、`followup_intervals_days`、`followup_max`、退信熔断阈值
 - **密钥**：`hunter_api_keys_env` 指向存放密钥的环境变量名（默认 `HUNTER_API_KEYS`）；密钥本身永不进 config，存放位置只有两个：系统环境变量，或仓库根目录的 `.env` 文件（本机私有、已被 git 忽略、全部脚本经 `scripts/_config.py` 自动读取，真实环境变量优先于 .env）
 
 ## 仓库结构

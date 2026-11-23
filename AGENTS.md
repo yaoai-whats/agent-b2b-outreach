@@ -40,7 +40,7 @@ No stage runs before Step 0 is complete. Business parameters are asked, not assu
 | 2. Enrich | `prompts/02-enrich.md` | Rows missing a verified contact | Decision-maker, email pattern, verification status on the same rows | Each worked row has a verified useful email, or is marked unreachable with a reason |
 | 3. Batch | `prompts/03-batch.md` | Ranked reachable rows, `templates/letter-templates.md` | Letter drafts that pass `scripts/quality_gate.py`; send log entries | Batch respects `daily_send_cap` (see config), every letter passed the gate |
 | 4. Inbox | `prompts/04-inbox.md` | Mailbox replies, bounces, unsubscribes | Feedback entries, lead status updates, breaker state | Every new reply and bounce is classified and written back |
-| 5. Follow-up | `prompts/05-followup.md` | Sent rows with no reply | Follow-up drafts (new content only), tracker updates | No company exceeds `followup_max` (see config); interval respected (see config) |
+| 5. Follow-up | `prompts/05-followup.md` | Sent rows with no reply | Follow-up drafts (new content, new angle only), tracker updates | No company exceeds `followup_max` (see config); per-step intervals respected (see config) |
 
 Shared scripts:
 
@@ -76,7 +76,7 @@ The executing agent needs four capabilities: web search, opening and reading web
 5. **Quality gate is a gate.** No em dashes, no snooping language, no hype claims, clean greeting, length within limits. Fail means fix or drop, never override.
 6. **Bounce circuit breaker.** If bounces reach the thresholds in config (default: 3 or more in one day, or 15% or more of the last 20 sends), stop all sending, report, and wait for a human. See `docs/06-exclusions-and-failsafes.md`.
 7. **Sending caps and timing.** Never exceed `daily_send_cap` (see config). Spread sends across the recipient's local business hours on business days.
-8. **Follow-up discipline.** Interval and maximum count come from config (defaults: 30 days, at most 2 follow-ups). Every follow-up must carry genuinely new content. A bare nudge is not a follow-up.
+8. **Follow-up discipline.** Intervals and maximum count come from config (shipped defaults: waits of 4, 7, and 7 days, at most 3 follow-ups; the third is a short closing letter). Every follow-up must carry genuinely new content from a new angle. A bare nudge is not a follow-up. Never follow up with a company that bounced, replied, explicitly refused, or unsubscribed, or whose only address is a service/functional mailbox or an unverified accept-all address (see `docs/05-followup-policy.md`).
 9. **Secrets stay in the environment or the repo-root `.env`.** Scripts read API keys and credentials from environment variables. On a local machine, the executing agent stores the values the operator hands over in `<repo>/.env` — git-ignored, loaded automatically by `scripts/_config.py` at import, with real environment variables taking precedence. That file is the only file a secret may ever be written to. Never write a secret to config, logs, letters, or chat output, and never echo a value back to the operator.
 10. **Write everything back.** Every send, bounce, reply, and unsubscribe updates the lead row and the feedback log in the same run. The next round depends on it.
 

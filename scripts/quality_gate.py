@@ -11,6 +11,10 @@ Checks:
 4. No unverifiable claim phrases.
 5. Greeting is clean: no brackets, no title residue, no non-name characters.
 6. Body within the word limit; optional rendered link within its limit.
+7. Follow-ups only (check_followup): no bare-nudge phrases ("just
+   following up" and kin — a follow-up must carry new information from a
+   new angle, never a content-free reminder), and the body must not be a
+   near-copy of the previous letter to the same company.
 
 Word lists are defaults only. Extend them per language and per business by
 editing the lists below, by adding a "risk_claims" / "spam_phrases" /
@@ -59,6 +63,23 @@ RISK_CLAIMS = ["guaranteed certified", "certification guaranteed",
 
 MAX_WORDS = 130
 MAX_URL = 1800
+
+# Bare-nudge formulations banned in follow-ups (check_followup only).
+# A follow-up earns its send with new information from a new angle; these
+# phrases are the fingerprint of a content-free reminder. First touches
+# are not checked against this list.
+FOLLOWUP_NUDGE_PHRASES = ["just following up", "just checking in",
+                          "just wanted to follow up",
+                          "i am following up", "i'm following up",
+                          "following up on my last",
+                          "following up on my previous",
+                          "checking in on my", "circling back",
+                          "a gentle reminder", "just a reminder",
+                          "touching base"]
+
+# A follow-up whose word set overlaps the previous letter's at or above
+# this Jaccard similarity is a re-send, not a new angle.
+FOLLOWUP_MAX_SIMILARITY = 0.75
 
 
 def _load_extra():
@@ -115,6 +136,38 @@ def check_email(name, subject, body, url_len=0):
     return fails
 
 
+def _word_set(text):
+    return set(re.findall(r"[a-z0-9']+", (text or "").lower()))
+
+
+def check_followup(name, subject, body, previous_body=None, url_len=0):
+    """Quality gate for a follow-up letter.
+
+    Runs every first-touch check, then the follow-up-specific ones: no
+    bare-nudge phrases, and — when the previous letter's body is given —
+    the follow-up must not be a near-copy of it. A follow-up that repeats
+    the previous letter's angle is refused here so it gets rewritten
+    with genuinely new content instead of shipped as a reminder.
+    """
+    fails = check_email(name, subject, body, url_len)
+    low = ((subject or "") + "\n" + (body or "")).lower()
+    for phrase in FOLLOWUP_NUDGE_PHRASES:
+        if phrase in low:
+            fails.append(f"contains bare-nudge phrase: {phrase}")
+    if previous_body:
+        current, previous = _word_set(body), _word_set(previous_body)
+        union = current | previous
+        if union:
+            similarity = len(current & previous) / len(union)
+            if similarity >= FOLLOWUP_MAX_SIMILARITY:
+                fails.append(
+                    f"follow-up body is too similar to the previous "
+                    f"letter (word overlap {similarity:.2f}, limit "
+                    f"{FOLLOWUP_MAX_SIMILARITY}); rewrite from a new "
+                    "angle with new information")
+    return fails
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the letter quality gate.")
     parser.add_argument("--subject", default="")
@@ -122,10 +175,25 @@ if __name__ == "__main__":
     parser.add_argument("--body-file", required=True,
                         help="Path to a UTF-8 text file with the letter body.")
     parser.add_argument("--url-len", type=int, default=0)
+    parser.add_argument("--followup", action="store_true",
+                        help="Apply the follow-up checks (bare-nudge "
+                             "phrases, and similarity when --previous-file "
+                             "is given) on top of the standard checks.")
+    parser.add_argument("--previous-file", default="",
+                        help="Path to the previous letter's body file, "
+                             "for the follow-up similarity check.")
     args = parser.parse_args()
     with open(args.body_file, encoding="utf-8") as fh:
         body_text = fh.read()
-    failures = check_email(args.name, args.subject, body_text, args.url_len)
+    if args.followup:
+        previous_text = None
+        if args.previous_file:
+            with open(args.previous_file, encoding="utf-8") as fh:
+                previous_text = fh.read()
+        failures = check_followup(args.name, args.subject, body_text,
+                                  previous_text, args.url_len)
+    else:
+        failures = check_email(args.name, args.subject, body_text, args.url_len)
     if failures:
         for reason in failures:
             print(f"GATE_FAIL: {reason}")

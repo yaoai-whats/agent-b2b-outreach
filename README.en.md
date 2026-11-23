@@ -42,7 +42,7 @@ Most small exporters and B2B sellers face the same problem: directories sell sta
 | 2 | Enrich | Candidates without a verified contact | Decision-maker name, role, verified email, email pattern |
 | 3 | Batch | Ranked, reachable, unsent companies | Personalised letters that passed `scripts/quality_gate.py` |
 | 4 | Inbox | Your mailbox (replies, bounces, unsubscribes) | Updated lead status, feedback log, circuit-breaker check |
-| 5 | Follow-up | Sent companies with no reply | At most 2 follow-ups, 30 days apart, each with new content |
+| 5 | Follow-up | Sent companies with no reply | At most 3 follow-ups, 4/7/7 days apart (days 4, 11, 18), each with new content from a new angle; the third is a closing letter |
 
 See `AGENTS.md` for the agent operating map, `docs/01-methodology.md` for the full ten-step method, and `schedules.md` for suggested cadence.
 
@@ -107,7 +107,7 @@ Key groups:
 - **Buyers:** `buyer_categories`, `decision_maker_titles`, `fit_signals`, `scoring_weights`
 - **Exclusions:** `exclusion_rules` (your own rules, for example suspected competitors or existing customers), plus `config/blocklist.json`
 - **Sender:** `sender_name`, `sender_company`, `sender_email`, `notification_email`. The actual From address follows a fixed priority: the `SMTP_FROM` environment variable > `sender_email` in config > `SMTP_USER`; when the first two are both set and differ, `SMTP_FROM` wins and `scripts/doctor.py` warns about it
-- **Sending safety:** `daily_send_cap`, `followup_interval_days`, `followup_max`, bounce circuit-breaker thresholds
+- **Sending safety:** `daily_send_cap`, `followup_intervals_days`, `followup_max`, bounce circuit-breaker thresholds
 - **Keys:** `hunter_api_keys_env` names the environment variable that holds your keys (`HUNTER_API_KEYS` by default). Keys never live in config; the only two homes are real environment variables or the repo-root `.env` file (local, git-ignored, loaded automatically by every script through `scripts/_config.py`; real environment variables win over `.env`)
 
 ## Repository layout

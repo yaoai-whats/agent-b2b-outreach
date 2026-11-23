@@ -37,7 +37,7 @@ One JSON object per line, one line per company. The file is the single living da
 | `excluded_reason` | Why the row is excluded, when it is | String; empty when not excluded |
 | `outreach_status` | Pipeline state | `new`, `enriched`, `sent`, `replied`, `bounced`, `unsubscribed`, `sequence_complete`, `excluded` |
 | `last_touch_at` | Date of the most recent letter or follow-up | `YYYY-MM-DD` or empty |
-| `followups_sent` | Follow-ups sent so far | Integer, never above `followup_max` in config |
+| `followups_sent` | Follow-ups sent so far | Integer, never above `followup_max` in config (shipped 3; waits come from `followup_intervals_days`, shipped [4, 7, 7]) |
 
 ## Rules
 

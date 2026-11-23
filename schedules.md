@@ -8,7 +8,7 @@ Frequencies below are starting suggestions for a small operation sending at the 
 | 2. Enrich | `prompts/02-enrich.md` | Once per week | Work the highest tiers first. Respect the paid-verification budget rules in config. |
 | 3. Batch | `prompts/03-batch.md` | Each business day | Prepare and send up to `daily_send_cap` (see config), spread across recipient-local business hours. Ramp a new mailbox up gradually over 2 to 3 weeks. |
 | 4. Inbox | `prompts/04-inbox.md` | Twice per business day (morning and evening) | Classify replies, bounces, and unsubscribes; run the circuit-breaker check on every pass. |
-| 5. Follow-up | `prompts/05-followup.md` | Once per week | Only companies past the follow-up interval (see config) with follow-ups remaining, and only with new content ready. |
+| 5. Follow-up | `prompts/05-followup.md` | Once per week | Only companies past their next sequence interval (see config; shipped waits 4/7/7 days) with follow-ups remaining, and only with new content ready. Because the first follow-up falls due 4 days after a first letter, a weekly pass is the slowest cadence that honours the sequence; twice a week tracks it more closely. |
 | Review | (manual) | Once per month | Re-read reply and bounce patterns, adjust scoring weights and fit signals in config, prune dead sources. |
 
 ## Registering scheduled jobs (for the executing agent)

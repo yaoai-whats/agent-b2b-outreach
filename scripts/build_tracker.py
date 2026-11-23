@@ -17,9 +17,14 @@ Outputs:
 Status priority: feedback outcome (reply / bounce / unsubscribe) beats sent,
 which beats scheduled, which beats excluded, which beats candidate.
 
-Follow-up logic follows docs/05-followup-policy.md: interval and maximum
-come from --interval-days and --max-followups (defaults 30 and 2, matching
-config keys followup_interval_days and followup_max).
+Follow-up logic follows docs/05-followup-policy.md: the wait before
+follow-up N is element N-1 of the interval sequence, and the sequence
+length is the maximum. Both default to config (followup_intervals_days,
+shipped as [4, 7, 7], and followup_max, shipped as 3 — see
+scripts/_config.py, which also folds a legacy flat
+followup_interval_days into a flat sequence). --intervals and
+--max-followups override config; --interval-days is kept as a legacy
+flat-interval override.
 
 Usage:
     python3 build_tracker.py --leads data/leads.jsonl \
@@ -31,6 +36,8 @@ import csv
 import json
 import os
 from datetime import datetime
+
+import _config
 
 STATUS_ORDER = {"replied": 0, "bounced": 1, "unsubscribed": 2, "sent": 3,
                 "scheduled": 4, "candidate": 5, "excluded": 6, "needs_contact": 7}
@@ -56,9 +63,27 @@ def main():
     parser.add_argument("--feedback", default="data/feedback.json")
     parser.add_argument("--out-csv", default="out/tracker.csv")
     parser.add_argument("--out-md", default="out/tracker-overview.md")
-    parser.add_argument("--interval-days", type=int, default=30)
-    parser.add_argument("--max-followups", type=int, default=2)
+    parser.add_argument("--intervals", default="",
+                        help="Comma-separated wait days before each "
+                             "follow-up, e.g. 4,7,7. Overrides config.")
+    parser.add_argument("--interval-days", type=int, default=None,
+                        help="Legacy flat interval override (same wait "
+                             "before every follow-up).")
+    parser.add_argument("--max-followups", type=int, default=None)
     args = parser.parse_args()
+
+    if args.intervals:
+        intervals = [int(x) for x in args.intervals.split(",") if x.strip()]
+        max_followups = args.max_followups or len(intervals)
+        while len(intervals) < max_followups:
+            intervals.append(intervals[-1])
+        intervals = intervals[:max_followups]
+    elif args.interval_days is not None:
+        max_followups = args.max_followups or _config.followup_max()
+        intervals = [args.interval_days] * max_followups
+    else:
+        intervals = _config.followup_intervals()
+        max_followups = args.max_followups or _config.followup_max()
 
     leads = load_leads(args.leads)
     send_state = load_json(args.send_state, {})
@@ -105,13 +130,14 @@ def main():
             last_touch = sent[name].get("sent_at", "")
             if fu_list:
                 last_touch = fu_list[-1].get("sent_at", last_touch)
-            if len(fu_list) >= args.max_followups:
+            if len(fu_list) >= max_followups:
                 next_action = "sequence complete; stop"
             elif last_touch:
                 try:
                     days = (datetime.now()
                             - datetime.strptime(last_touch[:10], "%Y-%m-%d")).days
-                    if days >= args.interval_days:
+                    wait = intervals[min(len(fu_list), len(intervals) - 1)]
+                    if days >= wait:
                         next_action = (f"follow-up {len(fu_list) + 1} eligible "
                                        f"(interval met, needs new content)")
                 except ValueError:

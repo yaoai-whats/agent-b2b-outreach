@@ -33,7 +33,10 @@ Modes:
   no reply, unsubscribe, or bounce for the company or address in the
   feedback log; not blocklisted; a prior touch exists; follow-ups
   already sent below followup_max (config); the last touch at least
-  followup_interval_days ago (config). A passed follow-up is recorded
+  the applicable sequence interval ago (config followup_intervals_days:
+  the wait before follow-up N is element N-1 of the list; a legacy flat
+  followup_interval_days folds into a flat sequence — see
+  scripts/_config.py). A passed follow-up is recorded
   in the send-state "followups" list, the shape build_tracker.py
   reads, and counts toward the same daily cap and breaker window as
   first touches.
@@ -100,6 +103,20 @@ from email.utils import format_datetime, make_msgid
 import _config
 
 SENDABLE_STATUSES = ("hunter_valid", "public_confirmed")
+
+# Local parts that are never a useful email (docs/03-email-verification.md):
+# customer-service / support / order-processing mailboxes and narrow
+# single-purpose functional addresses. A follow-up addressed to one of
+# these is refused at send time; main entry addresses (info, sales,
+# contact, hello, office and local-language equivalents) are NOT in this
+# list — they stay sendable as the documented fallback route.
+FUNCTIONAL_LOCAL_PARTS = frozenset({
+    "support", "customerservice", "customer-service", "customercare",
+    "customer-care", "service", "servicedesk", "helpdesk", "help",
+    "returns", "orders", "order", "press", "media", "careers", "jobs",
+    "hr", "uploads", "webmaster", "postmaster", "abuse", "noreply",
+    "no-reply",
+})
 
 
 def _today():
@@ -530,7 +547,14 @@ class Sender:
                     "record in the send state; a follow-up cannot be "
                     "the first letter a company receives")
 
-        max_fu = int(_config.get("followup_max", 2))
+        local = (to_addr or "").split("@")[0].strip().lower()
+        if local in FUNCTIONAL_LOCAL_PARTS:
+            return (f"functional mailbox: {to_addr} is a customer-service "
+                    "or single-purpose mailbox, not a decision-maker "
+                    "address; follow-ups never go there (see "
+                    "docs/03-email-verification.md on useful email)")
+
+        max_fu = _config.followup_max()
         fu_count = max(len(fu_records),
                        int(lead.get("followups_sent") or 0))
         if fu_count >= max_fu:
@@ -538,7 +562,9 @@ class Sender:
                     f"received {fu_count} follow-up(s), maximum is "
                     f"{max_fu}; the sequence is complete")
 
-        interval = int(_config.get("followup_interval_days", 30))
+        intervals = _config.followup_intervals()
+        interval = intervals[min(fu_count, len(intervals) - 1)] \
+            if intervals else 30
         touches = [str(r.get("sent_at", ""))[:10]
                    for r in sent_records + fu_records]
         if lead.get("last_touch_at"):
@@ -581,7 +607,7 @@ class Sender:
             return "refused", refusal, False
 
         import quality_gate
-        failures = quality_gate.check_email(gate_name, subject, body)
+        failures = quality_gate.check_followup(gate_name, subject, body)
         if failures:
             reason = "quality gate failed: " + "; ".join(failures)
             self._log(company, to_addr, subject, "refused", reason)

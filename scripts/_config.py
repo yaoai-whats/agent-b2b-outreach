@@ -103,6 +103,44 @@ def data_path(name):
     return os.path.join(repo_root(), "data", name)
 
 
+def followup_max():
+    """Maximum number of follow-ups per company.
+
+    `followup_max` in config wins when set. Otherwise the length of
+    `followup_intervals_days` defines the sequence length; with neither
+    key present the legacy default is 2.
+    """
+    if get("followup_max") is not None:
+        return int(get("followup_max"))
+    seq = get("followup_intervals_days")
+    if isinstance(seq, list) and seq:
+        return len(seq)
+    return 2
+
+
+def followup_intervals():
+    """Wait time in days before each follow-up, as a list.
+
+    Element N-1 is the wait after the previous touch before follow-up N
+    may be sent (shipped default: [4, 7, 7] — follow-ups land on days
+    4, 11, and 18 after the first letter; see docs/05-followup-policy.md).
+
+    Migration: a config that still carries only the legacy flat
+    `followup_interval_days` folds into a flat sequence of that length
+    repeated `followup_max` times, so existing operators keep exactly
+    the cadence they configured until they adopt the sequence form.
+    """
+    count = followup_max()
+    seq = get("followup_intervals_days")
+    if isinstance(seq, list) and seq:
+        values = [int(x) for x in seq]
+        while len(values) < count:
+            values.append(values[-1])
+        return values[:count]
+    legacy = int(get("followup_interval_days", 30))
+    return [legacy] * count
+
+
 if __name__ == "__main__":
     print(f"config file in use: {config_path()}")
     print(json.dumps(load(), ensure_ascii=False, indent=2))

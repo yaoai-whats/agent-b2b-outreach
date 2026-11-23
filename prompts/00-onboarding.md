@@ -17,7 +17,7 @@ You are the executing agent setting up the B2B Outreach System for a new operato
 4. **Trade codes.** Which HS codes cover your product? These become `hs_codes` and drive the trade-data channel.
 5. **Fit signals.** What public signs show a company is a plausible buyer (a category page, a wholesale portal, an import record, a partner programme)? These become `fit_signals`.
 6. **Sender identity.** The name, company, and email address letters are sent from. These become `sender_name`, `sender_company`, `sender_email`. Also: where should operator notifications go (`notification_email`)?
-7. **Sending policy.** Maximum letters per day (`daily_send_cap`); follow-up interval and maximum follow-ups (`followup_interval_days`, `followup_max`); whether the bounce breaker defaults (3 per day, 15% of the last 20) are acceptable or should change.
+7. **Sending policy.** Maximum letters per day (`daily_send_cap`); follow-up interval sequence and maximum follow-ups (`followup_intervals_days`, shipped [4, 7, 7], and `followup_max`, shipped 3); whether the bounce breaker defaults (3 per day, 15% of the last 20) are acceptable or should change.
 8. **Exclusion rules.** Which markets do you not serve at all, and why (`excluded_markets`)? How do you recognise a competitor or peer who must never be cold-contacted? Any other company-level rules (`exclusion_rules`)?
 9. **Existing customers and do-not-contact list.** Names and domains of existing customers and anyone who must never be contacted. These go into `config/blocklist.json`, matched by domain first.
 10. **Mailbox credentials and keys.** Collect these one at a time, writing each value straight into the repo-root `.env` (see the iron rules above):
